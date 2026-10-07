@@ -1,0 +1,281 @@
+package main
+
+import (
+	"encoding/binary"
+	"image"
+	"math"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestPTTMethodOptions(t *testing.T) {
+	want := []string{"None", "Hamlib", "Serial (RTS/DTR)", "CM108 GPIO", "HERMES SHM"}
+	if got := pttMethodOptions(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pttMethodOptions() = %v, want %v", got, want)
+	}
+
+	for _, method := range pttMethodOrder {
+		if got := pttMethodID(pttMethodLabel(method)); got != method {
+			t.Errorf("PTT method %q round-tripped to %q", method, got)
+		}
+	}
+}
+
+func TestRadioListAdvancedPTTSettings(t *testing.T) {
+	payload := []byte(`{"type":"radio_list","selected":"1","device_path":"COM4","serial_speed":9600,"ptt_method":"serial","ptt_line":"both","ptt_invert":"rts","cm108_gpio":4,"list":[]}`)
+	events := decodeWSMessage(1, payload)
+	if len(events) != 1 {
+		t.Fatalf("decodeWSMessage returned %d events, want 1", len(events))
+	}
+	event, ok := events[0].(RadioListEvent)
+	if !ok {
+		t.Fatalf("event has type %T, want RadioListEvent", events[0])
+	}
+	if event.PTTLine != "both" || event.PTTInvert != "rts" || event.CM108GPIO != "4" {
+		t.Fatalf("advanced PTT settings = line %q, invert %q, gpio %q",
+			event.PTTLine, event.PTTInvert, event.CM108GPIO)
+	}
+}
+
+func TestRadioListAdvancedPTTSettingsDefaultForOlderServer(t *testing.T) {
+	payload := []byte(`{"type":"radio_list","ptt_method":"serial","list":[]}`)
+	events := decodeWSMessage(1, payload)
+	event := events[0].(RadioListEvent)
+	if event.PTTLine != "rts" || event.PTTInvert != "none" || event.CM108GPIO != "3" {
+		t.Fatalf("legacy defaults = line %q, invert %q, gpio %q",
+			event.PTTLine, event.PTTInvert, event.CM108GPIO)
+	}
+}
+
+// TestConcurrentSpectrumAccessNoRace exercises the appState sharing between the
+// WebSocket reader goroutine (writer of spectrumValues/waterfallRows) and the
+// Fyne render goroutines (drawSpectrumImage/drawWaterfallImage). Run with -race:
+// without the appState mutex this reports a data race on the shared slices.
+func TestConcurrentSpectrumAccessNoRace(t *testing.T) {
+	state := &appState{}
+	img := image.NewNRGBA(image.Rect(0, 0, 64, 32))
+	done := make(chan struct{})
+
+	// Writer: mimic the reader goroutine publishing spectrum/waterfall frames.
+	go func() {
+		defer close(done)
+		for i := 0; i < 3000; i++ {
+			spectrum := make([]float32, 128)
+			for j := range spectrum {
+				spectrum[j] = float32(-100 + (i+j)%40)
+			}
+			row := make([]float32, len(spectrum))
+			copy(row, spectrum)
+			const maxWaterfallRows = 800
+			state.mu.Lock()
+			state.spectrumValues = spectrum
+			state.spectrumRate = 8000
+			state.waterfallRows = append(state.waterfallRows, row)
+			if len(state.waterfallRows) > maxWaterfallRows {
+				state.waterfallRows = state.waterfallRows[len(state.waterfallRows)-maxWaterfallRows:]
+			}
+			state.mu.Unlock()
+		}
+	}()
+
+	// Reader: mimic the canvas.Raster render callbacks running concurrently.
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			drawSpectrumImage(img, 64, 32, state)
+			drawWaterfallImage(img, 64, 32, state)
+		}
+	}
+}
+
+func TestParseStatusMessage(t *testing.T) {
+	payload := []byte(`{"type":"status","bitrate":1200,"snr":6.5,"sync":true,"direction":"tx","client_tcp_connected":true,"bytes_transmitted":34,"bytes_received":900,"tx_gain_db":3.5,"tx_peak_dbfs":-2.1,"waterfall":true,"audio_ok":true,"audio_error":""}`)
+
+	status, err := parseStatusMessage(payload)
+	if err != nil {
+		t.Fatalf("parseStatusMessage returned error: %v", err)
+	}
+	if status.Bitrate != 1200 {
+		t.Fatalf("expected bitrate 1200, got %d", status.Bitrate)
+	}
+	if math.Abs(status.SNR-6.5) > 0.001 {
+		t.Fatalf("expected snr 6.5, got %v", status.SNR)
+	}
+	if !status.Sync {
+		t.Fatal("expected sync to be true")
+	}
+	if status.Direction != "tx" {
+		t.Fatalf("expected direction tx, got %q", status.Direction)
+	}
+	if status.Waterfall != true {
+		t.Fatal("expected waterfall to be true")
+	}
+	if !status.AudioOk {
+		t.Fatal("expected audio_ok to be true")
+	}
+}
+
+func TestParseStatusMessageReportsAudioFailure(t *testing.T) {
+	payload := []byte(`{"type":"status","audio_ok":false,"audio_error":"capture: device negotiated 44100 Hz, not a multiple of 8000 Hz"}`)
+
+	status, err := parseStatusMessage(payload)
+	if err != nil {
+		t.Fatalf("parseStatusMessage returned error: %v", err)
+	}
+	if status.AudioOk {
+		t.Fatal("expected audio_ok to be false")
+	}
+	if !strings.Contains(status.AudioError, "44100 Hz") {
+		t.Fatalf("expected audio_error to mention the rate, got %q", status.AudioError)
+	}
+}
+
+// A status from an older engine without the audio fields must not be treated
+// as an audio failure (which would pop a spurious error dialog).
+func TestParseStatusMessageMissingAudioDefaultsHealthy(t *testing.T) {
+	payload := []byte(`{"type":"status","bitrate":1200}`)
+
+	status, err := parseStatusMessage(payload)
+	if err != nil {
+		t.Fatalf("parseStatusMessage returned error: %v", err)
+	}
+	if !status.AudioOk {
+		t.Fatal("expected missing audio_ok to default to healthy")
+	}
+}
+
+// audio_ok:false with no audio_error must parse to an empty string, so the
+// dialog's fallback message fires instead of showing the literal "<nil>".
+func TestParseStatusMessageAudioFailureWithoutErrorDefaultsEmpty(t *testing.T) {
+	payload := []byte(`{"type":"status","audio_ok":false}`)
+
+	status, err := parseStatusMessage(payload)
+	if err != nil {
+		t.Fatalf("parseStatusMessage returned error: %v", err)
+	}
+	if status.AudioOk {
+		t.Fatal("expected audio_ok to be false")
+	}
+	if status.AudioError != "" {
+		t.Fatalf("expected missing audio_error to parse as empty, got %q", status.AudioError)
+	}
+}
+
+func TestBuildWebSocketURLUsesWebsocketPath(t *testing.T) {
+	got := buildWebSocketURL("ws", "127.0.0.1", "10000")
+	want := "ws://127.0.0.1:10000/websocket"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestParseSpectrumFrame(t *testing.T) {
+	frame := make([]byte, 8+4*4)
+	frame[0] = 0x59
+	frame[1] = 0x52
+	frame[2] = 0x43
+	frame[3] = 0x4D
+	binary.LittleEndian.PutUint16(frame[4:], 4)
+	binary.LittleEndian.PutUint16(frame[6:], 8000)
+	binary.LittleEndian.PutUint32(frame[8:], 0x3F800000)
+	binary.LittleEndian.PutUint32(frame[12:], 0x40000000)
+	binary.LittleEndian.PutUint32(frame[16:], 0x40400000)
+	binary.LittleEndian.PutUint32(frame[20:], 0x40800000)
+
+	spectrum, sampleRate, err := parseSpectrumFrame(frame)
+	if err != nil {
+		t.Fatalf("parseSpectrumFrame returned error: %v", err)
+	}
+	if sampleRate != 8000 {
+		t.Fatalf("expected sample rate 8000, got %d", sampleRate)
+	}
+	if len(spectrum) != 4 {
+		t.Fatalf("expected 4 spectrum bins, got %d", len(spectrum))
+	}
+	if math.Abs(float64(spectrum[0])-1.0) > 0.001 {
+		t.Fatalf("expected first bin 1.0, got %v", spectrum[0])
+	}
+}
+
+// The cycle selector is the operator's only control over how long a broadcast
+// runs, so the label -> count mapping is worth pinning: "Until stopped" must be
+// 0 (endless) and never 1, and a typo in a label must not silently become 0.
+func TestCyclesFromChoice(t *testing.T) {
+	want := map[string]int{
+		"Once":          1,
+		"5 times":       5,
+		"10 times":      10,
+		"50 times":      50,
+		"Until stopped": 0,
+	}
+	for _, label := range cycleChoices {
+		got := cyclesFromChoice(label)
+		exp, ok := want[label]
+		if !ok {
+			t.Fatalf("choice %q has no expected mapping; update this test", label)
+		}
+		if got != exp {
+			t.Errorf("cyclesFromChoice(%q) = %d, want %d", label, got, exp)
+		}
+	}
+	if len(want) != len(cycleChoices) {
+		t.Errorf("cycleChoices has %d entries, test covers %d", len(cycleChoices), len(want))
+	}
+}
+
+// cycleText is what the operator reads while a transfer runs; an endless run
+// must not display a fake denominator.
+func TestCycleText(t *testing.T) {
+	if got := cycleText(broadcastFileProgress{CycleNow: 3, CyclesTotal: 0}); got != "3 (until stopped)" {
+		t.Errorf("endless run rendered as %q", got)
+	}
+	if got := cycleText(broadcastFileProgress{CycleNow: 2, CyclesTotal: 5}); got != "2/5" {
+		t.Errorf("bounded run rendered as %q", got)
+	}
+}
+
+// The embedded client shares the TNC ports with every other client, and the TNC
+// evicts the incumbent on a new accept -- tearing down any live ARQ session.
+// These pin the rule that stops a click from killing someone's transfer.
+func TestEmbeddedClientMayConnect(t *testing.T) {
+	cases := []struct {
+		name        string
+		alreadyOurs bool
+		tel         telemetryState
+		wantOK      bool
+	}{
+		{"free ports", false, telemetryState{}, true},
+		{"another client attached", false,
+			telemetryState{ClientTCPConnected: true}, false},
+		{"another client mid-session", false,
+			telemetryState{ClientTCPConnected: true, Sync: true}, false},
+		// Reconnecting our own client must stay possible: the attached client
+		// is us, so there is nobody else to evict.
+		{"the attached client is us", true,
+			telemetryState{ClientTCPConnected: true}, true},
+		{"the attached client is us, mid-session", true,
+			telemetryState{ClientTCPConnected: true, Sync: true}, true},
+		// A session cannot be live with nothing attached, but if the engine
+		// ever reports it, an empty port is still free to take.
+		{"session flag without a client", false,
+			telemetryState{Sync: true}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, why := embeddedClientMayConnect(tc.alreadyOurs, tc.tel)
+			if ok != tc.wantOK {
+				t.Fatalf("got ok=%v, want %v (reason %q)", ok, tc.wantOK, why)
+			}
+			if !ok && why == "" {
+				t.Fatal("refused without telling the operator why")
+			}
+			if ok && why != "" {
+				t.Fatalf("allowed but gave a reason %q", why)
+			}
+		})
+	}
+}

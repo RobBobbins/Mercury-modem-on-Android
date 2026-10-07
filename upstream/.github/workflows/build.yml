@@ -1,0 +1,457 @@
+# Mercury CI Pipeline - Build Verification
+#
+# Triggers:
+#   - Automatically on every Pull Request
+#   - Manually via workflow_dispatch (select which targets to build)
+#   - Automatically on every push to mercuryv2
+#
+# Builds:
+#   - Linux amd64 (native, Debian 13)
+#   - Linux arm64 (cross-compile, Debian 13)
+#   - Linux armhf (cross-compile, Debian 13)
+#   - Windows x64 (cross-compile via MinGW, Debian 13)
+#   - macOS arm64 (native, Apple Silicon runner)
+
+name: Build
+
+on:
+  pull_request:
+    branches: [mercuryv2]
+  push:
+    branches: [mercuryv2]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Target branch | default = "mercuryv2"'
+        required: false
+        type: string
+        default: 'mercuryv2'
+      build_linux_amd64:
+        description: 'Build Linux amd64'
+        type: boolean
+        default: true
+      build_linux_arm64:
+        description: 'Build Linux arm64 (cross-compile)'
+        type: boolean
+        default: true
+      build_linux_armhf:
+        description: 'Build Linux armhf (cross-compile)'
+        type: boolean
+        default: true
+      build_macos_arm64:
+        description: 'Build macOS arm64 (Apple Silicon)'
+        type: boolean
+        default: true
+      build_windows:
+        description: 'Build Windows x64 (cross-compile)'
+        type: boolean
+        default: true
+      build_fyne_ui_linux:
+        description: 'Build Fyne UI (native Linux)'
+        type: boolean
+        default: true
+      build_fyne_ui_windows:
+        description: 'Build Fyne UI Windows x64 (cross-compile)'
+        type: boolean
+        default: true
+
+jobs:
+  build-linux-amd64:
+    name: Build Linux amd64 (Debian 13)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event.inputs.build_linux_amd64 == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            build-essential \
+            git \
+            openssh-client \
+            libpulse-dev \
+            libasound2-dev \
+            libhamlib-dev \
+            libssl-dev \
+            pkg-config
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: Rhizomatica/mercury
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Git Safe Directory
+        run: git config --global --add safe.directory /__w/mercury/mercury
+
+      - name: Build Mercury (Linux amd64)
+        shell: bash
+        run: |
+          make clean
+          make -j$(nproc) 2>&1
+          echo "BUILD_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Check build result
+        run: |
+          if [ "$BUILD_EXIT_CODE" != "0" ]; then
+            echo "::error::Linux amd64 build failed"
+            exit 1
+          fi
+          echo "Linux amd64 build succeeded"
+
+  build-linux-arm64:
+    name: Build Linux arm64 (cross-compile, Debian 13)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event.inputs.build_linux_arm64 == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            build-essential \
+            git \
+            openssh-client \
+            pkg-config \
+            gcc-aarch64-linux-gnu
+
+      - name: Enable arm64 multiarch
+        run: |
+          dpkg --add-architecture arm64
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libpulse-dev:arm64 \
+            libasound2-dev:arm64 \
+            libhamlib-dev:arm64 \
+            libssl-dev:arm64
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: Rhizomatica/mercury
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Git Safe Directory
+        run: git config --global --add safe.directory /__w/mercury/mercury
+
+      - name: Build Mercury (Linux arm64 cross-compile)
+        shell: bash
+        run: |
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig
+          make clean
+          make -j$(nproc) CC=aarch64-linux-gnu-gcc 2>&1
+          echo "BUILD_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Check build result
+        run: |
+          if [ "$BUILD_EXIT_CODE" != "0" ]; then
+            echo "::error::Linux arm64 cross-compile failed"
+            exit 1
+          fi
+          echo "Linux arm64 cross-compile succeeded"
+
+  build-linux-armhf:
+    name: Build Linux armhf (cross-compile, Debian 13)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event.inputs.build_linux_armhf == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            build-essential \
+            git \
+            openssh-client \
+            pkg-config \
+            gcc-arm-linux-gnueabihf
+
+      - name: Enable armhf multiarch
+        run: |
+          dpkg --add-architecture armhf
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libpulse-dev:armhf \
+            libasound2-dev:armhf \
+            libhamlib-dev:armhf \
+            libssl-dev:armhf
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: Rhizomatica/mercury
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Git Safe Directory
+        run: git config --global --add safe.directory /__w/mercury/mercury
+
+      - name: Build Mercury (Linux armhf cross-compile)
+        shell: bash
+        run: |
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export PKG_CONFIG_LIBDIR=/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig
+          make clean
+          make -j$(nproc) CC=arm-linux-gnueabihf-gcc 2>&1
+          echo "BUILD_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Check build result
+        run: |
+          if [ "$BUILD_EXIT_CODE" != "0" ]; then
+            echo "::error::Linux armhf cross-compile failed"
+            exit 1
+          fi
+          echo "Linux armhf cross-compile succeeded"
+
+  build-windows:
+    name: Build Windows x64 (cross-compile, Debian 13)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event.inputs.build_windows == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            git \
+            ca-certificates \
+            openssh-client \
+            gcc-mingw-w64-x86-64
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: Rhizomatica/mercury
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Git Safe Directory
+        run: git config --global --add safe.directory /__w/mercury/mercury
+
+      - name: Build Mercury (Windows x64 cross-compile)
+        shell: bash
+        run: |
+          make windows 2>&1
+          echo "BUILD_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Check build result
+        run: |
+          if [ "$BUILD_EXIT_CODE" != "0" ]; then
+            echo "::error::Windows x64 cross-compile failed"
+            exit 1
+          fi
+          echo "Windows x64 cross-compile succeeded"
+
+  # macOS arm64 (Apple Silicon), native.
+  #
+  # Exists because a macOS-only build break reached mercuryv2 unnoticed: the
+  # -latomic rule was widened to 'arm%' for a hand-edited armhf target (#200),
+  # and Apple Clang reports arm64-apple-darwin, which that pattern matches.
+  # macOS has no libatomic, so Apple Silicon builds failed to link until #209.
+  # Nothing in CI built macOS, so nothing caught it -- while the repo does ship
+  # macOS artifacts (make fyne-ui-macos-universal-dmg).
+  #
+  # Build-only on purpose: tests/Makefile links -lrt, which does not exist on
+  # macOS, so `make -C tests test` cannot run here without a separate change.
+  # A build is enough for this class of bug, which fails at link time.
+  #
+  # Note the plain checkout, unlike the four jobs above: they pass
+  # ssh-key: secrets.SSH_PRIVATE_KEY, and secrets are not available to pull
+  # requests from forks -- exactly the contributor whose macOS build we most
+  # want covered.
+  build-macos-arm64:
+    name: Build macOS arm64 (Apple Silicon)
+    runs-on: macos-14
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event.inputs.build_macos_arm64 == 'true'
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Toolchain and target detection
+        run: |
+          clang --version | head -1
+          echo "dumpmachine: $(clang -dumpmachine)"
+
+      - name: Guard - no -latomic on arm64
+        run: |
+          set -eu
+          # Read the value config.mk actually computes rather than asserting the
+          # pattern by eye.  macOS ships no libatomic, so anything here is a
+          # link failure waiting to happen.
+          printf 'include config.mk\nprint:\n\t@echo "[$(ATOMIC_LDFLAGS)]"\n' > /tmp/atomic.mk
+          ATOMIC=$(make -s -f /tmp/atomic.mk print)
+          echo "ATOMIC_LDFLAGS = $ATOMIC"
+          if [ "$ATOMIC" != "[]" ]; then
+            echo "::error::config.mk wants $ATOMIC on $(clang -dumpmachine);"
+            echo "::error::macOS provides no libatomic and the link will fail."
+            exit 1
+          fi
+
+      - name: Build Mercury (macOS arm64)
+        run: make -j"$(sysctl -n hw.ncpu)"
+
+      - name: Verify the binary
+        run: |
+          set -eu
+          [ -f mercury ] || { echo "::error::no mercury binary produced"; exit 1; }
+          file mercury
+          lipo -archs mercury
+          lipo -archs mercury | grep -q arm64 || {
+            echo "::error::binary is not arm64"; exit 1; }
+          echo "OK: macOS arm64 build"
+
+  # Native Fyne UI (`mercury-ui`): the CGo single-binary GUI that embeds the
+  # engine via libmercury_core.a.  Fyne's GLFW frontend is vendored and builds
+  # BOTH X11 and Wayland backends by default, so the container needs their dev
+  # headers (xorg-dev, libwayland-dev, libxkbcommon-dev) alongside the C core
+  # deps (libpulse/libasound/libhamlib).  libhidapi-dev is what turns this from
+  # "the UI compiles" into "the UI links the way it ships": with it, the
+  # Makefile sets HAVE_HIDAPI and cm108_ptt.o references hid_*, so the link
+  # really exercises the CGO_LDFLAGS="$(HIDAPI_LDFLAGS)" path.  Plain checkout
+  # (no ssh-key) so PRs from forks -- exactly the contributor whose GUI break we
+  # most want caught -- are covered; secrets are not available to those runs.
+  build-fyne-ui-linux:
+    name: Build Fyne UI (Linux amd64, Debian 13)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event.inputs.build_fyne_ui_linux == 'true'
+    timeout-minutes: 30
+    # trixie ships golang-go 1.24, but gui_interface/fyne-ui/go.mod requires
+    # go 1.26.8.  Pin the toolchain so the newer-Go fetch is a deliberate,
+    # visible step rather than a silent GOTOOLCHAIN=auto download mid-build.
+    env:
+      GOTOOLCHAIN: go1.26.8
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            build-essential \
+            file \
+            git \
+            golang-go \
+            pkg-config \
+            libpulse-dev \
+            libasound2-dev \
+            libhamlib-dev \
+            libssl-dev \
+            libhidapi-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            xorg-dev \
+            libwayland-dev \
+            libxkbcommon-dev
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Git Safe Directory
+        run: git config --global --add safe.directory /__w/mercury/mercury
+
+      - name: Build Mercury Fyne UI (Linux amd64)
+        run: make fyne-ui
+
+      - name: Verify the binary
+        run: |
+          set -eu
+          [ -f mercury-ui ] || { echo "::error::no mercury-ui binary produced"; exit 1; }
+          file mercury-ui
+          echo "OK: native Fyne UI build"
+
+  # Cross-compiled Fyne UI for Windows (`windows-installer/mercury-ui.exe`).
+  # Same CGo single-binary GUI as the native job, but linked against
+  # libmercury_core_w64.a via MinGW.  Dependency set mirrors the release/signpath
+  # Windows jobs: no native pulse/asound/hamlib needed -- the Windows build uses
+  # the vendored hamlib-w64/hidapi-w64 trees.
+  build-fyne-ui-windows:
+    name: Build Fyne UI Windows x64 (cross-compile, Debian 13)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event.inputs.build_fyne_ui_windows == 'true'
+    timeout-minutes: 30
+    # Same toolchain pin as the native job: the Fyne module needs go 1.26.8.
+    env:
+      GOTOOLCHAIN: go1.26.8
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            build-essential \
+            file \
+            git \
+            golang-go \
+            gcc-mingw-w64-x86-64 \
+            mingw-w64-x86-64-dev \
+            mingw-w64-common
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.branch || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Git Safe Directory
+        run: git config --global --add safe.directory /__w/mercury/mercury
+
+      - name: Build Mercury Fyne UI (Windows x64 cross-compile)
+        run: make fyne-ui-windows
+
+      - name: Verify the binary
+        run: |
+          set -eu
+          [ -f windows-installer/mercury-ui.exe ] || { echo "::error::no mercury-ui.exe produced"; exit 1; }
+          file windows-installer/mercury-ui.exe
+          echo "OK: Windows Fyne UI cross-build"

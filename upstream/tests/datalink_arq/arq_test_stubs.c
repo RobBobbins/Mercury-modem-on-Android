@@ -1,0 +1,119 @@
+/*
+ * Mock stubs for ARQ unit tests
+ *
+ * Provides stub implementations of external dependencies used by
+ * ARQ modules, so tests can link without pulling in modem/audio/etc.
+ *
+ * Copyright (C) 2026 Rhizomatica
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdio.h>
+#ifdef SIM_TRACE_LOGS
+#include <stdarg.h>
+#endif
+
+#include "hermes_log.h"
+#include "framer.h"
+#include "arq.h"
+
+/* ---- hermes_log stubs ---- */
+
+static uint64_t mock_uptime_value = 0;
+
+uint64_t hermes_uptime_ms(void)
+{
+    return mock_uptime_value;
+}
+
+void mock_set_uptime_ms(uint64_t ms)
+{
+    mock_uptime_value = ms;
+}
+
+void hermes_logf(hermes_log_level_t level, const char *component,
+                 const char *fmt, ...)
+{
+#ifdef SIM_TRACE_LOGS
+    /* Opt-in FSM log visibility for sim debugging:
+     *   make ... CFLAGS+=-DSIM_TRACE_LOGS
+     * Prefixes the virtual uptime so traces line up with sim time, and the
+     * callsign of the station being dispatched (the sim sets it per event),
+     * so a two-station trace says whose line is whose. */
+    va_list ap;
+    fprintf(stderr, "[%8llu ms] [%-6s] [%s] ",
+            (unsigned long long)hermes_uptime_ms(), arq_conn.my_call_sign, component);
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    (void)level;
+#else
+    (void)level; (void)component; (void)fmt;
+#endif
+}
+
+/* ---- framer stubs ---- */
+
+void write_frame_header(uint8_t *data, int packet_type, uint8_t extension)
+{
+    data[0] = (uint8_t)((packet_type << PACKET_TYPE_SHIFT) | (extension & FRAME_EXT_MASK));
+}
+
+int8_t parse_frame_header(const uint8_t *data_frame, uint32_t frame_size, uint8_t *extension_out)
+{
+    if (!data_frame || frame_size < 1) return -1;
+    uint8_t ptype = frame_header_packet_type(data_frame[0]);
+    if (extension_out)
+        *extension_out = frame_header_extension(data_frame[0]);
+    return (int8_t)ptype;
+}
+
+/* ---- arq_info global (used by arq.h) ---- */
+
+arq_info arq_conn = {0};
+
+/* ---- arq.c function stubs ---- */
+
+int arq_reported_bandwidth_hz(void)
+{
+    return ARQ_BANDWIDTH_FULL_HZ; /* default to 2300 Hz for tests */
+}
+
+/* Single-threaded test doubles: read straight from the arq_conn global so
+ * tests that seed arq_conn.my_call_sign / arq_conn.bw still observe them. */
+void arq_conn_get_calls(char *my_call, char *src_addr, char *dst_addr, size_t bufsz)
+{
+    if (bufsz == 0) return;
+    if (my_call)  { snprintf(my_call,  bufsz, "%s", arq_conn.my_call_sign); }
+    if (src_addr) { snprintf(src_addr, bufsz, "%s", arq_conn.src_addr); }
+    if (dst_addr) { snprintf(dst_addr, bufsz, "%s", arq_conn.dst_addr); }
+}
+
+int arq_get_bw(void)
+{
+    return arq_conn.bw;
+}
+
+bool arq_bandwidth_allows_mode(int mode)
+{
+    (void)mode;
+    return true; /* allow all modes in tests */
+}
+
+/* ---- freedv_gen_crc16 stub (CRC16-CCITT) ---- */
+
+unsigned short freedv_gen_crc16(unsigned char *data_p, int length)
+{
+    unsigned short crc = 0xFFFF;
+    for (int i = 0; i < length; i++) {
+        unsigned char x = (unsigned char)(crc >> 8) ^ data_p[i];
+        x ^= x >> 4;
+        crc = (unsigned short)((crc << 8) ^ ((unsigned short)(x << 12)) ^
+              ((unsigned short)(x << 5)) ^ ((unsigned short)x));
+    }
+    return crc;
+}

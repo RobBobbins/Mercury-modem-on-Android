@@ -1,0 +1,645 @@
+# Mercury TNC Command Reference
+
+Mercury exposes a **VARA-compatible TCP TNC interface** for client applications.
+Two TCP ports are used:
+
+| Port             | Default | Purpose                                    |
+|------------------|---------|--------------------------------------------|
+| Control port     | 8300    | Text commands and asynchronous status lines |
+| Data port        | 8301    | Raw application data (binary payload)       |
+| Broadcast port   | 8100    | KISS-framed broadcast frames (separate)     |
+
+The control and data ports are `base_port` and `base_port + 1` respectively;
+override with `-p <base_port>`.  The broadcast port is independent; override
+with `-b <port>`.
+
+All control commands and responses are **CR-terminated ASCII** (`\r`).
+
+---
+
+## Commands (Client → Mercury)
+
+Commands are sent on the **control port**.
+
+### MYCALL
+
+Set the local station callsign and optional secondary callsigns.
+
+```
+MYCALL <callsign> [<secondary1> <secondary2> ...]\r
+```
+
+**Response:** `OK\r` on success, `WRONG\r` on error.  After `OK`, an
+asynchronous `REGISTERED <callsign>\r` notification confirms the callsign is
+recognised (VARA compatibility).
+
+The first token is the **primary callsign** (up to 15 characters), used as the
+source address for outgoing `CALL` and `ACCEPT` frames.  Any additional
+space-separated tokens are registered as **secondary callsigns** — Mercury will
+accept incoming `CALL` frames addressed to any of them, up to a maximum of
+`CALLSIGN_MAX_SECONDARY` (currently 4) secondary callsigns.
+
+Sending a new `MYCALL` command replaces the primary callsign and **clears all
+previously registered secondary callsigns**.
+
+Must be set before `LISTEN ON` or `CONNECT`.
+
+Examples:
+
+```
+MYCALL VK2XYZ\r
+MYCALL VK2XYZ VK2XYZ-1 VK2XYZ-2\r
+```
+
+---
+
+### LISTEN
+
+Enable or disable listening for incoming ARQ connections.
+
+```
+LISTEN ON\r
+LISTEN OFF\r
+LISTEN CQ\r
+```
+
+**Response:** `OK\r` on success, `WRONG\r` on error.
+
+When enabled, Mercury enters the LISTENING state and will accept incoming
+CALL frames addressed to the local callsign (or any callsign if PUBLIC is ON).
+
+`LISTEN CQ` is treated as `LISTEN ON` (VARA compatibility).
+
+---
+
+### PUBLIC
+
+Accept calls addressed to any callsign (promiscuous mode).
+
+```
+PUBLIC ON\r
+PUBLIC OFF\r
+```
+
+**Response:** `OK\r` on success, `WRONG\r` on error.
+
+Default is OFF.  When ON, Mercury accepts incoming CALL frames regardless
+of the destination callsign.
+
+---
+
+### BW (Bandwidth)
+
+Set the maximum ARQ bandwidth.
+
+```
+BW2300\r
+BW500\r
+BW2750\r
+```
+
+**Response:** `OK\r` on success, `WRONG\r` on error.
+
+- **BW2300** — Full bandwidth.  Allows gear-shifting up to DATAC1 (510 bytes/frame).
+- **BW500** — Narrow bandwidth.  Restricts the maximum payload mode to DATAC3/DATAC4.
+- **BW2750** — Tactical mode token accepted for VARA compatibility. Mercury
+  currently uses the same payload-mode ceiling as **BW2300**, but preserves
+  `2750` as a negotiated/reporting token.
+
+During connection setup, Mercury advertises the local BW token in `CALL` and
+returns the negotiated token in `ACCEPT`. If either side is `BW500`, the session
+stays at `500` on both ends. If both sides are wide, the session keeps the lower
+wide token (`2300` or `2750`) and `CONNECTED ... BW` reports that negotiated value.
+
+---
+
+### COMPRESSION
+
+No-op for VARA client compatibility.
+
+```
+COMPRESSION ON\r
+COMPRESSION OFF\r
+```
+
+**Response:** `OK\r` (always).
+
+Mercury does not use compression; this command exists so VARA-compatible
+clients can connect without errors.
+
+---
+
+### CHAT
+
+Enable chat-optimized mode (VARA compatibility).
+
+```
+CHAT ON\r
+CHAT OFF\r
+```
+
+**Response:** `OK\r` on success, `WRONG\r` on error.
+
+`CHAT ON` implicitly enables `LISTEN ON`, placing Mercury in the LISTENING
+state.  This matches VARA behavior, where chat applications expect the modem
+to be ready for incoming connections after `CHAT ON`.
+
+`CHAT OFF` is acknowledged but has no effect — Mercury does not currently
+differentiate chat and file-transfer timing.
+
+---
+
+### P2P
+
+No-op for VARA client compatibility.
+
+```
+P2P\r
+```
+
+**Response:** `OK\r` (always).
+
+---
+
+### CONNECT
+
+Initiate an ARQ connection to a remote station.
+
+```
+CONNECT <mycall> <theircall>\r
+```
+
+**Response:** `OK\r` if the command was accepted, `WRONG\r` on error.
+
+Mercury will transmit CALL frames on DATAC16 (the control mode), advertising
+the local BW token,
+and wait for an ACCEPT carrying the negotiated session BW.
+On success, the asynchronous response
+`CONNECTED <sourcecall> <destcall> <bandwidth>\r` is sent on the control port,
+preserving the same call order as the original `CONNECT` command on both peers.
+
+Example:
+```
+CONNECT AAAA BBBB\r
+```
+
+---
+
+### CQFRAME
+
+Transmit a compact CQ frame on the control mode (DATAC16).
+
+```
+CQFRAME <sourcecall> <bandwidth>\r
+```
+
+`<bandwidth>` must be one of `500`, `2300`, or `2750`.
+
+**Response:** `OK\r` if the command was accepted, `WRONG\r` on error.
+
+For VARA compatibility, Mercury also emits `PENDING\r` when the CQ frame
+starts transmitting and `CANCELPENDING\r` once that CQ transmission is done.
+
+---
+
+### DISCONNECT
+
+Terminate the current ARQ session.
+
+```
+DISCONNECT\r
+```
+
+**Response:** `OK\r` if the command was accepted, `WRONG\r` on error.
+
+Mercury sends DISCONNECT frames to the peer.  Once complete, the
+asynchronous response `DISCONNECTED\r` is sent on the control port.
+
+---
+
+### ABORT
+
+Dirty disconnect — drop everything still held and end the session at once.
+
+```
+ABORT\r
+```
+
+**Response:** `OK\r` if the command was accepted, `WRONG\r` on error.
+
+`DISCONNECT` first delivers what is still queued: unsent bytes, and the
+last frame's ACK.  `ABORT` does not wait.  It discards the unsent TX data,
+the frames awaiting an ACK and received data not yet read, then sends the
+DISCONNECT frames straight away (after any frame already on the air), so
+the peer is told rather than left to time out.  `DISCONNECTED\r` is sent
+on the control port at once, as for `DISCONNECT`.
+
+---
+
+### VERSION
+
+Query the modem identification string.
+
+```
+VERSION\r
+```
+
+**Response:** A VARA-compatible version string on the control port.
+
+This command exists for VARA-compatible clients that check the modem version
+at startup.
+
+---
+
+### IGNOREKISSDCD
+
+No-op for VARA client compatibility.
+
+```
+IGNOREKISSDCD\r
+```
+
+**Response:** `OK\r` (always).
+
+---
+
+### BUFFER
+
+Query the number of bytes pending in the ARQ transmit buffer.
+
+```
+BUFFER\r
+```
+
+**Response:** `BUFFER <bytes>\r` on the control port.
+
+---
+
+### SN
+
+Query the last measured signal-to-noise ratio.
+
+```
+SN\r
+```
+
+**Response:** `SN <value>\r` (e.g., `SN 8.2\r`) on the control port.
+
+---
+
+### BITRATE
+
+Query the current throughput estimate.
+
+```
+BITRATE\r
+```
+
+**Response:** `BITRATE (<speed_level>) <bps> BPS\r` on the control port.
+
+---
+
+### RETRIES
+
+Override the amount of retries Mercury will try to connect or retry a transmission before giving up.
+Setting to 0 should revert to the defined values in datalink_arq/arq_protocol.h.
+
+```
+RETRIES 10\r
+```
+
+---
+
+### CALLINT
+
+Override the interval in **whole seconds** between successive CALL/ACCEPT
+frame retries during connection setup.  This has no effect on other control
+frame timing (keepalive, disconnect, turn request) or on data frame retry
+timing once a session is established.
+
+Send `0` to restore the compiled default (7 seconds).  The minimum
+enforced value is 4 seconds; values below 4 are clamped to 4 to avoid
+firing a retry before a valid ACCEPT can return over the air.
+
+```
+CALLINT 5\r
+CALLINT 0\r
+```
+
+**Response:** `OK\r` on success, `WRONG\r` on error.
+
+---
+
+### MODE
+
+Set the **listen mode** — the payload mode the station sits on while no ARQ
+session is up.  This decides which broadcast frames the station can hear and
+send, and takes the same index space as the `-m` startup option (use `-l` to
+list them).
+
+```
+MODE 10\r          set the listen mode to QAM16C2
+MODE\r             report the current listen mode
+```
+
+The query form answers `MODE <index> <name>\r`, e.g. `MODE 10 QAM16C2\r`, so
+the reported index round-trips as the argument to a later `MODE` command.
+
+**Response:** `OK\r` on success, `BUSY\r` if an ARQ session is up, `WRONG\r`
+for an index that is out of range or not switchable at runtime.
+
+Two limits are worth knowing:
+
+* **Only accepted while the ARQ link is idle** (disconnected or listening).
+  During a session the ARQ mode ladder owns the payload mode and would
+  overwrite an operator setting within one RX-loop iteration, so the command
+  answers `BUSY\r` rather than silently accepting a setting that is about to
+  be discarded.
+* **Only the pooled payload modes are runtime-switchable:** indexes 0
+  (DATAC1), 1 (DATAC3), 3 (DATAC4), 7 (DATAC15), 9 (DATAC17) and 10
+  (QAM16C2).  DATAC16 is the ARQ control mode, and DATAC0 / DATAC13 / DATAC14
+  / FSK_LDPC have no runtime pool slot — `-m` can still *start* on some of
+  those, but they cannot be selected later, and `MODE` answers `WRONG\r`.
+
+This does **not** change how ARQ connections behave.  Every session — inbound
+or outbound — resets its mode ladder to DATAC15 and climbs from there via
+OLLA, so a fast listen mode gives a later connection no head start, and a
+robust one costs it nothing.  Setting the listen mode is about *broadcast*
+reception and transmission while idle.
+
+---
+
+### TUNE
+
+Key the transmitter and hold a steady **1000 Hz tone**, so an antenna tuner
+can find a match — and so an operator has a known reference to set drive
+against.  Same syntax as VARA HF / VARA SAT.
+
+```
+TUNE -15\r      key TX, tone at -15 dBFS
+TUNE ?\r        report the current drive level
+TUNE OFF\r      stop the tone and unkey
+```
+
+The level is **absolute dBFS at the sound card**, in the range `-60` to `0`.
+It deliberately does *not* pass through the modulator TX gain (`tx_gain`):
+`TUNE -15` means −15 dBFS, not −15 dBFS scaled by whatever the modulator gain
+happens to be — otherwise it would be useless as a reference for setting that
+very gain.
+
+Re-issuing `TUNE <level>` while a carrier is already running changes the level
+and restarts the safety timer, which is what adjusting drive on a live tuner
+requires.
+
+> **The carrier always stops by itself after 60 seconds.**
+> A tuning carrier is the one transmission with no protocol underneath it, so
+> nothing else bounds it: a host that crashes, forgets `TUNE OFF`, or simply
+> drops the control socket would otherwise leave the radio keyed — cooking the
+> finals and jamming the channel.  Do not rely on the timer for normal
+> operation; send `TUNE OFF` when the tuner is done.
+
+`TUNE` is **refused** (`WRONG\r`) when:
+
+- the level is outside `-60 .. 0` dBFS, or is not a number;
+- an ARQ link is currently connected, or a burst is in flight — a tuning
+  carrier and a data burst must never key the radio at the same time.
+
+While the carrier is up, ARQ transmissions are suppressed; `TUNE OFF` (or the
+timer) restores normal operation.  The usual `PTT ON\r` / `PTT OFF\r`
+asynchronous lines bracket the carrier exactly as they do a data burst.
+
+**Response:** `OK\r` on success, `WRONG\r` on error.
+`TUNE ?` replies `TUNE <level>\r` (for example `TUNE -15\r`).
+
+---
+
+
+## Asynchronous Responses (Mercury → Client)
+
+These are sent on the **control port** without a preceding command.
+
+| Response                                    | Meaning                                      |
+|---------------------------------------------|----------------------------------------------|
+| `PENDING\r`                                 | Incoming connect request or outgoing CQ TX started |
+| `CANCELPENDING\r`                           | Pending incoming connect cancelled or outgoing CQ TX completed |
+| `CONNECTED <sourcecall> <destcall> <bandwidth>\r` | ARQ session established                |
+| `CQFRAME <sourcecall> <bandwidth>\r`        | Compact CQ frame decoded                     |
+| `DISCONNECTED\r`                            | ARQ session ended                            |
+| `PTT ON\r`                                  | Radio transmitter keyed                      |
+| `PTT OFF\r`                                 | Radio transmitter unkeyed                    |
+| `BUFFER <bytes>\r`                          | TX buffer level update (periodic)            |
+| `SN <value>\r`                              | SNR update                                   |
+| `BUSY ON\r`                                 | Channel became occupied (busy detector)      |
+| `BUSY OFF\r`                                | Channel became clear (busy detector)         |
+| `BITRATE (<level>) <bps> BPS\r`            | Throughput update                            |
+| `IAMALIVE\r`                                | Heartbeat (sent periodically while idle)     |
+| `REGISTERED <callsign>\r`                  | Callsign registration confirmed (after MYCALL) |
+
+### PENDING
+
+Sent when Mercury detects an incoming ARQ connect request addressed to the
+local station. This is an early warning so VARA-compatible host applications
+can suspend scanning or other idle activity while the link setup is in progress.
+
+Mercury also sends `PENDING\r` when an outgoing `CQFRAME` actually begins
+transmitting so VARA clients can treat CQ send as an in-progress operation.
+
+### CANCELPENDING
+
+Sent when a previously pending incoming connect request does not complete and
+Mercury returns to the idle/listening state.
+
+Mercury also sends `CANCELPENDING\r` when an outgoing `CQFRAME` transmission
+finishes, which matches the lifecycle expected by VARA clients such as varim.
+
+### CONNECTED
+
+Sent when a session is successfully established (either outgoing CONNECT
+or incoming CALL accepted). The `<bandwidth>` value is the negotiated session
+BW token from the `CALL` / `ACCEPT` exchange (`500`, `2300`, or `2750`).
+If either peer is `BW500`, both sides report `500`. If both peers stay wide,
+Mercury reports the lower of the two wide tokens, preserving `2750` only when
+both sides advertised it. `<sourcecall>` is always the station that initiated
+the session, and `<destcall>` is always the station that was called.
+
+### CQFRAME
+
+Sent when Mercury decodes a compact CQ frame on the air.
+`<sourcecall>` is the transmitting station and `<bandwidth>` is the BW token
+advertised inside that CQ frame (`500`, `2300`, or `2750`).
+
+### BUSY ON / BUSY OFF
+
+Emitted by the optional channel-busy (occupancy) detector when it observes the
+HF channel transition between clear and occupied, using VARA's exact wording so
+existing VARA-compatible hosts (BPQ32, Winlink) act on them unchanged.
+Edge-triggered: `BUSY ON\r` on clear→busy, `BUSY OFF\r` on busy→clear.
+
+The detector is **disabled by default** and is enabled via the `[channel]`
+section of `mercury.ini` (`busy_detect = true`).  It is off because the hosts
+that consume these notifications act on them: BPQ32 and Winlink hold
+transmissions while BUSY is asserted, so a false or over-eager BUSY stops the
+station transmitting.  Enable it if your host scans.  Its sensitivity/timing knobs
+(`busy_threshold_db`, `busy_hysteresis_db`, `busy_on_debounce_ms`,
+`busy_hang_ms`) typically need on-air tuning per band/noise environment. When
+disabled, these notifications are never sent. See `mercury.ini.example`.
+
+The detector needs a receive filter at least ~1.8 kHz wide.  It measures
+300-2700 Hz and takes its noise floor from the quieter part of that range, so a
+narrower filter puts the floor under the filter skirt and an empty channel reads
+BUSY (offline: 99% of the time behind a 600-2200 Hz filter, never at 500-2300 Hz
+or wider).  A continuous signal covering most of the passband is eventually
+absorbed into the floor and reads CLEAR after ~60 s (+12 dB) to ~95 s (+20 dB);
+a step up in the noise itself cannot be told from such a signal and reads BUSY
+for ~100-145 s until the floor catches up.
+
+`BUSY ON` is the earliest notification a host can act on: it follows the carrier
+by roughly the debounce time (~0.3 s by default), whereas `PENDING` cannot be
+sent until a whole connect request has decoded — 3.74 s in the DATAC16 control
+mode. A host that scans channels needs the former to hold its dwell long enough
+to receive the latter.
+
+### DISCONNECTED
+
+Sent when the session ends, either by local DISCONNECT, remote DISCONNECT,
+or timeout.
+
+### BUFFER
+
+Sent periodically during data transfer.  The value reflects the number of
+application bytes still queued for transmission.  When it reaches `0`, all
+data has been acknowledged by the peer.
+
+### IAMALIVE
+
+Sent periodically on the control port as a keepalive to detect broken
+TCP connections.
+
+### REGISTERED
+
+Sent when a callsign is set via `MYCALL`, confirming the callsign is
+licensed (VARA compatibility).  Arrives after the `OK\r` response to
+`MYCALL`.  Also sent on client reconnect if a callsign is already set.
+
+`REGISTERED` is **per call sign**, so `MYCALL` emits one line for the primary
+and one for each secondary it accepted, in the order given:
+
+```
+MYCALL AAAA BBBB CCCC\r
+OK\r
+REGISTERED AAAA\r
+REGISTERED BBBB\r
+REGISTERED CCCC\r
+```
+
+Secondaries beyond the four Mercury can hold are dropped, and dropped ones are
+not acknowledged — the host would otherwise address a callsign this station
+never answers.
+
+---
+
+## Data Port
+
+The **data port** (`base_port + 1`, default 8301) carries raw application
+payload.  Bytes written to the data port are queued for ARQ transmission;
+bytes received from the remote station are delivered on the data port.
+
+No framing is needed — Mercury handles segmentation internally.  The data
+port only carries payload when a session is CONNECTED.
+
+---
+
+## Broadcast Port
+
+The **broadcast port** (default 8100) is independent of ARQ and uses
+**KISS framing**.  One-way broadcast frames are sent/received as
+fixed-size KISS-encoded packets matching the modem's payload size.
+
+That frame size follows the **listen mode**, set at startup with `-m` and
+changeable at runtime with the [`MODE`](#mode) control-port command.  A
+connected broadcast client picks up a new frame size on its next frame — the
+socket does not need to be reopened — so a `MODE` change re-frames the plane
+underneath a live client.  Size your client's frames from the mode you
+selected, not from a cached value.
+
+Three client framings are accepted, distinguished by the KISS command byte:
+
+- `0x00` (standard KISS data / VARA "AX.25 standard") and `0x01` (VARA
+  "AX.25 7-char callsign", used by VARA): Mercury injects its 1-byte
+  broadcast header plus a 2-byte payload-length prefix, zero-pads to the
+  modem frame size, and records which of the two framings the sender used
+  in a header extension bit (`BCAST_EXT_KISS_STD`).  The receiving side
+  delivers exactly the original payload with the **sender's** command byte
+  — so VARA↔VARA traffic stays `0x01` and standard-KISS clients
+  (e.g. Reticulum, see [RETICULUM.md](RETICULUM.md)) get `0x00`.
+- `0x02` (`CMD_DATA`) is used by two different clients and is distinguished
+  by the whole first byte:
+  - **hermes-broadcast**: the frame carries a Mercury broadcast header — a
+    broadcast packet type (`PACKET_TYPE_BROADCAST_CONTROL`/
+    `PACKET_TYPE_BROADCAST_DATA`) **and** a zero extension, which is what
+    hermes-broadcast writes for both its config and payload frames.  Passed
+    raw; zero-padded if short, discarded if oversized.
+  - **VARA beacons/pings** (and any other unformatted `CMD_DATA` payload):
+    Mercury wraps it exactly like `0x00`/`0x01` and records the framing in a
+    `BCAST_EXT_KISS_DATA` extension bit, so the receiver delivers the original
+    payload back as `0x02`.
+
+  Testing only the packet-type bits is not sufficient — they are the top 3
+  bits, so 25% of arbitrary first bytes look like a broadcast type, including
+  every lowercase letter, and such a beacon would be passed raw and lost.
+  Requiring a zero extension as well cuts that to 0.8%, and to nothing across
+  `a`–`z`.
+
+  Frame length must **not** be used as the discriminator: hermes-broadcast
+  sends its config frames `RQ_HEADER_SIZE` short of a full modem frame and
+  relies on Mercury's zero-padding, so a `frame_len == frame_size` test drops
+  every config packet and the far side never starts decoding.
+
+Payloads larger than the modem frame (minus 3 bytes of header+length)
+are truncated (`0x00`/`0x01`/unformatted-`0x02`) or discarded (raw
+hermes-broadcast `0x02`) — the broadcast plane does not fragment.
+
+---
+
+## Typical Session Flow
+
+```
+Client                          Mercury
+  |                                |
+  |--- (TCP connect to 8300) ---->|
+  |--- (TCP connect to 8301) ---->|
+  |                                |
+  |--- MYCALL AAAA\r ------------>|
+  |<-- OK\r ----------------------|
+  |<-- REGISTERED AAAA\r ---------|
+  |                                |
+  |--- LISTEN ON\r -------------->|
+  |<-- OK\r ----------------------|
+  |                                |
+  |--- BW2300\r ------------------>|
+  |<-- OK\r ----------------------|
+  |                                |
+  |--- CONNECT AAAA BBBB\r ------>|
+  |<-- OK\r ----------------------|
+  |                                |  (RF: CALL/ACCEPT exchange)
+  |<-- CONNECTED AAAA BBBB 2300\r |
+  |                                |
+  |--- (write data to 8301) ----->|  (RF: DATA frames)
+  |<-- BUFFER 2404\r -------------|
+  |<-- PTT ON\r ------------------|
+  |<-- PTT OFF\r ------------------|
+  |<-- BUFFER 0\r ----------------|
+  |                                |
+  |<-- (read data from 8301) -----|  (received from remote)
+  |                                |
+  |--- DISCONNECT\r -------------->|
+  |<-- OK\r ----------------------|
+  |<-- DISCONNECTED\r ------------|
+```
+
+---
+
+## See Also
+
+- [ARQ Protocol & Architecture](ARQ.md) — Wire protocol, FSM, gear-shifting, tuning guide.
+- [Mercury README](../README.md) — Build instructions, CLI usage, project links.

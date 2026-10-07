@@ -1,0 +1,422 @@
+mercury (1.9.17-1) unstable; urgency=medium
+
+  * Release 1.9.17.
+  * gui: darken Activity Log text on the light theme.
+  * debian: build-depend on wayland, xkbcommon and hidapi.
+  * Station fixes: TNC listener start race, shutdown drain hang, unkey on shutdown, watchdog step.
+  * radio_io: hold RTS/DTR low on a hamlib CAT port; hamlib_conf pass-through (#294).
+  * arq: answer a DISCONNECT that crosses ours; a re-call ends the teardown.
+  * freedv: TX filters that fit their modes (QAM16C2 unfiltered, DATAC17 too tight).
+  * gui: keep Activity Log read-only without the disabled colour.
+  * cli: find mercury.ini where it is installed, and say when there is none.
+  * radio_io: use portable token_t instead of hamlib_token_t.
+  * tnc: ABORT drops what is in flight and goes at once; say what it sends (#218).
+
+ -- Rafael Diniz <rafael@riseup.net>  Fri, 02 Oct 2026 12:34:49 +0000
+
+mercury (1.9.16-1) unstable; urgency=medium
+
+  * Release 1.9.16.
+  * ci: run the unit tests on i386 too.
+  * modem: don't let ARQ bytes with no session up block broadcast TX.
+  * arq: listen before retrying a TURN_REQ, not only before the first one.
+  * arq: listen before retransmitting and before every TURN_REQ.
+  * modem: make the busy detector read an empty channel as clear.
+  * arq: nothing from an ended session reaches the next client.
+  * Revert "audioio: increase Linux ALSA/Pulse buffer from 30ms to 80ms" (#83).
+  * main: never leave the transmitter keyed on a forced exit.
+  * arq: don't resurrect an ended session on a late DATA from its peer.
+  * arq: listen before the first DATA of a turn and before DISCONNECT.
+  * arq: the IRS asks in its ACK while the ISS has more queued.
+  * arq: send the ACK that hands us the turn and our first data burst in one keydown.
+  * tests: retry the reactor test on a fresh port pair.
+  * build: scope the m68k libatomic fallback outside the arm block.
+  * tests: make the watterson golden checksum endianness-independent.
+  * audioio: -x rtp, radio audio over RTP multicast with in-stream PTT.
+  * build: add COMMON_LDFLAGS for improved linker hardening.
+  * README: one Mercury; the released macOS .dmg is signed and notarized.
+
+ -- Rafael Diniz <rafael@riseup.net>  Mon, 28 Sep 2026 16:07:16 +0000
+
+mercury (1.9.15-1) unstable; urgency=medium
+
+  * Release 1.9.15.
+  * tests: make loopsim runs repeatable, stop it killing other mercurys, and stop go test caching.
+  * arq: place a CONNECT sent during teardown instead of dropping it.
+  * build: rebuild objects when their Makefile or config.mk changes.
+  * tests: run the ch fading-file preflight only for the ch engine.
+  * telemetry: report the bitrate of frames on the air, and make the card readable.
+  * store, tests: keep binary frames out of chat history, and tests out of the user's.
+  * cli: add -V option to print the version and exit.
+  * arq: settle a MODE_REQ that crosses a TURN_REQ, instead of both sides waiting.
+  * ui: remove the legacy set_radio_config command.
+  * Fix libatomic on m68k architecture.
+  * Fix compilation on GNU/Hurd.
+  * fyne-ui: default Mercury Client TCP target to the remote host.
+  * build: ensure mercury_cli.o rebuilds with GIT_HASH changes.
+  * Replace mongoose with our own WebSocket server (GPLv3 licence fix).
+  * tests: fix the three i386 failures (#299).
+  * modem, radio_io: stop TX test mode on a signal, and unkey on shutdown.
+
+ -- Rafael Diniz <rafael@riseup.net>  Tue, 22 Sep 2026 22:46:35 +0000
+
+mercury (1.9.14-1) unstable; urgency=medium
+
+  * Release 1.9.14.
+  * Add PTT method configuration.
+  * PTT method configuration: serial, CM108/AIOC, and three-platform hidapi.
+  * Fix audio capture on Mac OS.
+  * fix(arq): add bounded random jitter to retry deadlines.
+  * modem/rx + arq/fsm: fix two causes of missed first-burst decodes (fixes #223).
+  * build: fix the macOS universal build (vendored hidapi object never rebuilt per-arch).
+  * Expose non-blocking radio and ARQ telemetry.
+  * watterson: seed the fading channel, from a private generator.
+  * gui: show the SNR the far side reports for our signal (#230).
+  * Makefile: link vendored hidapi into the Windows UI archive.
+  * Broadcast file transfer (RaptorQ) with a Fyne UI panel.
+  * Makefile: stop archiving rigctl_parse.o twice for Windows.
+  * Broadcast follow-ups: chat length cap, and stop tracking built tools.
+  * ui: allow runtime ALSA/PulseAudio subsystem switch on Linux.
+  * docs: publish the broadcast file-transfer benchmarks.
+  * macOS: Developer ID signing and notarization, wired into releases.
+  * macos: wait longer for notarization than rcodesign's default.
+  * macos: survive a transient error while waiting on notarization.
+  * macos: sign with entitlements, and staple the .app as well as the .dmg.
+  * ci: actually staple the .app, and give the runner room to package.
+  * ci: build Fyne UI (native + Windows) on every PR and mercuryv2 push.
+  * ui: derive the audio subsystem picker from the compiled-in backends.
+  * modem: add the MFSK fringe waveform (DSP core + tests), not yet wired in.
+  * utils: fix the MFSK sweeps, which compiled but never linked.
+  * tests/integration: reap orphaned modems, and stop the two paths fading in lockstep.
+  * tests/integration: a lockstep bench where the same seed reproduces the run.
+  * audioio: report the CoreAudio OSStatus, and stop leaking IOProcs on failure.
+  * arq: a low-perturbation trace ring, compiled out of release builds.
+  * audioio: keep IOProc ownership correct, and cap the reopen backoff where it says.
+  * audioio: identify CoreAudio devices by UID, not by enumeration index.
+  * audioio: mark the system-default CoreAudio device, and clear the Tahoe deprecation warnings.
+  * gui: make client window scrollable and persist chat window geometry.
+  * Persist ARQ/broadcast chat history across restarts.
+  * build: track header dependencies, so a header edit rebuilds what includes it.
+  * tests/integration: make the channel bridge behave like a radio.
+  * arq: only send an ACCEPT in answer to a CALL we actually heard.
+  * arq: accept incoming DATA while waiting for a keepalive reply.
+  * arq: break the tie when both stations request the turn at once.
+  * tcp: make broadcast listener shutdown bounded.
+  * broadcast: fix the RaptorQ symbol size so symbols survive a mode change.
+  * tests/integration: exercise the TURN_REQ role change on real modems.
+  * modem: MODE command to change the listen mode while the link is idle.
+  * tests: carry a real NNCP bundle over the broadcast plane, and record the result.
+  * build: say what is wrong when pkg-config reports an unusable hamlib.
+  * fyne-ui: make the embedded client an explicit, interlocked choice.
+  * audioio: increase Linux ALSA/Pulse buffer from 30ms to 80ms.
+  * arq: stop the ISS keying TURN_ACK on top of the ACK it is waiting for.
+  * arq: don't key a TURN_REQ over the peer's burst.
+  * docs: bring the turn handover in ARQ.md back in line with the code.
+
+ -- Rafael Diniz <rafael@riseup.net>  Tue, 15 Sep 2026 13:30:09 +0000
+
+mercury (1.9.13-1) unstable; urgency=medium
+
+  * Release 1.9.13.
+  * release: bank the signed zip before attempting the installer.
+  * gui: tell two identical-looking sound cards apart (#189).
+  * gui: keep the device id whole when the label will not fit (#189 follow-up).
+  * audioio: support the 44.1 kHz family, and report the failures that remain (#193).
+  * build+tests: -latomic on armhf, and a stale-test-binary hazard (#200).
+  * Fix VARA/Pat connect-disconnect hangs and uncommanded exit (#200).
+  * UI: highlight TX/RX direction and align spectrum/waterfall to 0-3000 Hz.
+  * ui: compile the web pages into the binary so they are actually reachable (#204).
+  * freedv: honor configured archiver.
+  * arq/tnc: acknowledge every callsign MYCALL accepts, not just the primary.
+  * ci: let the Windows job check out on pull requests from forks.
+  * Avoid libatomic on macOS arm64 build.
+  * ci: build macOS arm64, the target that had no coverage at all.
+  * fix(arq): strictly validate session IDs.
+  * fix(tests): avoid integration test port collisions.
+  * Add Logs menu, Submit issue item, and logs directory handling.
+  * Support VarAC Beacon.
+
+ -- Rafael Diniz <rafael@riseup.net>  Mon, 24 Aug 2026 19:58:26 +0000
+
+mercury (1.9.12-1) unstable; urgency=medium
+
+  * Release 1.9.12.
+  * installer: shortcut name cannot contain "/" — it aborts Setup on Windows.
+  * Fix coreaudio device id mismatch on macOS.
+  * channel: enable the busy detector by default, deliver BUSY like other state.
+  * arq/fsm: defer LISTEN OFF during grace period after PENDING.
+  * audioio: add mutex for PulseAudio to avoid race conditions.
+  * audioio: fix segfault on UI connect when a PulseAudio device has no description (#150).
+  * gui: drive the embedded UI through CGo, behind a transport-agnostic Link.
+  * arq/tnc: send REGISTERED <callsign> when both callsign set and listening.
+  * build: drop the redundant SAN_LDFLAGS from freedv and utils link lines.
+  * channel: busy detector back to opt-in, and never during a session.
+  * Add configurable tx_delay_ms.
+  * 1.9.12: callsign truncation, CALL retry anchor, Watterson double, acquire/decode instrument.
+  * audioio: enable the OSS backend on Linux (OSSv4), and fix device selection around it.
+  * audioio: pre-fault the OSS capture buffer (fixes sporadic EFAULT from osscore).
+  * Revert #166: the OSS EFAULT pre-fault was based on a wrong diagnosis.
+  * audioio: ask OSS for the buffer geometry before setting the format.
+  * audioio: read OSS capture a fragment at a time.
+  * ofdm: FFT-based burst acquisition — 2.2x less idle RX CPU, identical sensitivity (#162).
+  * modem: run the two OFDM decoders in parallel, one thread each.
+  * audioio: do not leak the OSS buffer when open() is retried.
+  * fyne-ui-v2: Mercury Client chat window, waterfall palette & toggle, UI polish.
+  * Follow-up fixes for fyne-ui-v2 (PR #174 review comments).
+  * modem: show the waterfall while transmitting.
+  * audioio: report a failed sound card instead of dying quietly.
+  * macos: version-stamp the .dmg, ship the CLI in it, and sign with rcodesign.
+  * Add SignPath trial workflow and update artifact configurations.
+  * radio_io: say when radio_device is the wrong kind of port for the rig (#179).
+  * Fyne UI refinements: window geometry persistence, Telemetry SNR, menu & chat window polish.
+  * Mercury client: bandwidth toggle and Send CQ Frame.
+  * docs: lead with what Mercury is, add a docs index, and correct the control mode.
+  * audioio: stop cutting long audio device names at 63 characters (#185).
+  * audioio/ui: move the device-enumeration arrays off the stack.
+  * modem: size the RX buffers from the ladder, not a fixed 2 s.
+  * release: make the Windows installer step actually work.
+  * release: one SimplySign session per job, and build the installer by default.
+  * release: sign before wine is installed, and retry a flaky login.
+
+ -- Rafael Diniz <rafael@riseup.net>  Sun, 16 Aug 2026 19:25:14 +0000
+
+mercury (1.9.12-1) unstable; urgency=medium
+
+  * Release 1.9.12.
+  * installer: shortcut name cannot contain "/" — it aborts Setup on Windows.
+  * Fix coreaudio device id mismatch on macOS.
+  * channel: enable the busy detector by default, deliver BUSY like other state.
+  * arq/fsm: defer LISTEN OFF during grace period after PENDING.
+  * audioio: add mutex for PulseAudio to avoid race conditions.
+  * audioio: fix segfault on UI connect when a PulseAudio device has no description (#150).
+  * gui: drive the embedded UI through CGo, behind a transport-agnostic Link.
+  * arq/tnc: send REGISTERED <callsign> when both callsign set and listening.
+  * build: drop the redundant SAN_LDFLAGS from freedv and utils link lines.
+  * channel: busy detector back to opt-in, and never during a session.
+  * Add configurable tx_delay_ms.
+  * 1.9.12: callsign truncation, CALL retry anchor, Watterson double, acquire/decode instrument.
+  * audioio: enable the OSS backend on Linux (OSSv4), and fix device selection around it.
+  * audioio: pre-fault the OSS capture buffer (fixes sporadic EFAULT from osscore).
+  * Revert #166: the OSS EFAULT pre-fault was based on a wrong diagnosis.
+  * audioio: ask OSS for the buffer geometry before setting the format.
+  * audioio: read OSS capture a fragment at a time.
+  * ofdm: FFT-based burst acquisition — 2.2x less idle RX CPU, identical sensitivity (#162).
+  * modem: run the two OFDM decoders in parallel, one thread each.
+  * audioio: do not leak the OSS buffer when open() is retried.
+  * fyne-ui-v2: Mercury Client chat window, waterfall palette & toggle, UI polish.
+  * Follow-up fixes for fyne-ui-v2 (PR #174 review comments).
+  * modem: show the waterfall while transmitting.
+  * audioio: report a failed sound card instead of dying quietly.
+  * macos: version-stamp the .dmg, ship the CLI in it, and sign with rcodesign.
+  * Add SignPath trial workflow and update artifact configurations.
+  * radio_io: say when radio_device is the wrong kind of port for the rig (#179).
+  * Fyne UI refinements: window geometry persistence, Telemetry SNR, menu & chat window polish.
+  * Mercury client: bandwidth toggle and Send CQ Frame.
+  * docs: lead with what Mercury is, add a docs index, and correct the control mode.
+  * audioio: stop cutting long audio device names at 63 characters (#185).
+  * audioio/ui: move the device-enumeration arrays off the stack.
+  * modem: size the RX buffers from the ladder, not a fixed 2 s.
+  * release: make the Windows installer step actually work.
+  * release: one SimplySign session per job, and build the installer by default.
+
+ -- Rafael Diniz <rafael@riseup.net>  Sun, 16 Aug 2026 18:59:27 +0000
+
+mercury (1.9.12-1) unstable; urgency=medium
+
+  * Release 1.9.12.
+  * installer: shortcut name cannot contain "/" — it aborts Setup on Windows.
+  * Fix coreaudio device id mismatch on macOS.
+  * channel: enable the busy detector by default, deliver BUSY like other state.
+  * arq/fsm: defer LISTEN OFF during grace period after PENDING.
+  * audioio: add mutex for PulseAudio to avoid race conditions.
+  * audioio: fix segfault on UI connect when a PulseAudio device has no description (#150).
+  * gui: drive the embedded UI through CGo, behind a transport-agnostic Link.
+  * arq/tnc: send REGISTERED <callsign> when both callsign set and listening.
+  * build: drop the redundant SAN_LDFLAGS from freedv and utils link lines.
+  * channel: busy detector back to opt-in, and never during a session.
+  * Add configurable tx_delay_ms.
+  * 1.9.12: callsign truncation, CALL retry anchor, Watterson double, acquire/decode instrument.
+  * audioio: enable the OSS backend on Linux (OSSv4), and fix device selection around it.
+  * audioio: pre-fault the OSS capture buffer (fixes sporadic EFAULT from osscore).
+  * Revert #166: the OSS EFAULT pre-fault was based on a wrong diagnosis.
+  * audioio: ask OSS for the buffer geometry before setting the format.
+  * audioio: read OSS capture a fragment at a time.
+  * ofdm: FFT-based burst acquisition — 2.2x less idle RX CPU, identical sensitivity (#162).
+  * modem: run the two OFDM decoders in parallel, one thread each.
+  * audioio: do not leak the OSS buffer when open() is retried.
+  * fyne-ui-v2: Mercury Client chat window, waterfall palette & toggle, UI polish.
+  * Follow-up fixes for fyne-ui-v2 (PR #174 review comments).
+  * modem: show the waterfall while transmitting.
+  * audioio: report a failed sound card instead of dying quietly.
+  * macos: version-stamp the .dmg, ship the CLI in it, and sign with rcodesign.
+  * Add SignPath trial workflow and update artifact configurations.
+  * radio_io: say when radio_device is the wrong kind of port for the rig (#179).
+  * Fyne UI refinements: window geometry persistence, Telemetry SNR, menu & chat window polish.
+  * Mercury client: bandwidth toggle and Send CQ Frame.
+  * docs: lead with what Mercury is, add a docs index, and correct the control mode.
+  * audioio: stop cutting long audio device names at 63 characters (#185).
+  * audioio/ui: move the device-enumeration arrays off the stack.
+  * modem: size the RX buffers from the ladder, not a fixed 2 s.
+  * release: make the Windows installer step actually work.
+
+ -- Rafael Diniz <rafael@riseup.net>  Sun, 16 Aug 2026 18:15:22 +0000
+
+mercury (1.9.12-1) unstable; urgency=medium
+
+  * Release 1.9.12.
+  * installer: shortcut name cannot contain "/" — it aborts Setup on Windows.
+  * Fix coreaudio device id mismatch on macOS.
+  * channel: enable the busy detector by default, deliver BUSY like other state.
+  * arq/fsm: defer LISTEN OFF during grace period after PENDING.
+  * audioio: add mutex for PulseAudio to avoid race conditions.
+  * audioio: fix segfault on UI connect when a PulseAudio device has no description (#150).
+  * gui: drive the embedded UI through CGo, behind a transport-agnostic Link.
+  * arq/tnc: send REGISTERED <callsign> when both callsign set and listening.
+  * build: drop the redundant SAN_LDFLAGS from freedv and utils link lines.
+  * channel: busy detector back to opt-in, and never during a session.
+  * Add configurable tx_delay_ms.
+  * 1.9.12: callsign truncation, CALL retry anchor, Watterson double, acquire/decode instrument.
+  * audioio: enable the OSS backend on Linux (OSSv4), and fix device selection around it.
+  * audioio: pre-fault the OSS capture buffer (fixes sporadic EFAULT from osscore).
+  * Revert #166: the OSS EFAULT pre-fault was based on a wrong diagnosis.
+  * audioio: ask OSS for the buffer geometry before setting the format.
+  * audioio: read OSS capture a fragment at a time.
+  * ofdm: FFT-based burst acquisition — 2.2x less idle RX CPU, identical sensitivity (#162).
+  * modem: run the two OFDM decoders in parallel, one thread each.
+  * audioio: do not leak the OSS buffer when open() is retried.
+  * fyne-ui-v2: Mercury Client chat window, waterfall palette & toggle, UI polish.
+  * Follow-up fixes for fyne-ui-v2 (PR #174 review comments).
+  * modem: show the waterfall while transmitting.
+  * audioio: report a failed sound card instead of dying quietly.
+  * macos: version-stamp the .dmg, ship the CLI in it, and sign with rcodesign.
+  * Add SignPath trial workflow and update artifact configurations.
+  * radio_io: say when radio_device is the wrong kind of port for the rig (#179).
+  * Fyne UI refinements: window geometry persistence, Telemetry SNR, menu & chat window polish.
+  * Mercury client: bandwidth toggle and Send CQ Frame.
+  * docs: lead with what Mercury is, add a docs index, and correct the control mode.
+  * audioio: stop cutting long audio device names at 63 characters (#185).
+  * audioio/ui: move the device-enumeration arrays off the stack.
+  * modem: size the RX buffers from the ladder, not a fixed 2 s.
+
+ -- Rafael Diniz <rafael@riseup.net>  Sun, 16 Aug 2026 17:54:55 +0000
+
+mercury (1.9.11-1) unstable; urgency=medium
+
+  * Release 1.9.11.
+  * freedv/HARQ: average combined LLRs by copy count (not raw-sum).
+  * freedv/HARQ: gate combined-decode acceptance on parity count, not CRC16 alone.
+  * modem: 8 MB stacks for TX/RX threads — fixes macOS crash on wide OFDM modes.
+  * audio: -x sock — a virtual-clock lockstep backend for device-free testing.
+  * Store config, logs in install dir on Windows and fix audio device persistence on restart.
+  * build(windows): Authenticode signing via Certum SimplySign (jsign) — validated, +CI.
+  * docs(windows-signing): finish de-personalising the reference tables.
+  * fix: race condition in WebSocket connect callback on aarch64.
+  * modem: TUNE command — a 1 kHz ATU tuning carrier with a hard unkey timer.
+  * docs(TNC): document the TUNE command in the host command reference.
+  * audioio: fix int32 stereo mix overflow, resample by the device's real rate.
+  * audioio: support 24-bit packed (S24_3LE) cards on Linux.
+  * windows: sign the installer and its payloads; ship the console binary.
+  * arq+tnc: honour LISTEN OFF in every state; make host state notifications reliable.
+  * ci(release): build and sign the Windows installer from a prepared Inno tree.
+  * ci: install the tools the signer image lacks; honour Integration's branch input.
+
+ -- Rafael Diniz <rafael@riseup.net>  Thu, 30 Jul 2026 19:05:53 +0000
+
+mercury (1.9.10-1) unstable; urgency=medium
+
+  * Release 1.9.10.
+  * docs: fix minor README typos / grammar.
+  * arq: fix WAIT_ACK pending-disconnect dropping last frame (Fix-14 regr….
+  * Added new more robust mores DATAC15 DATAC16.
+  * audioio: fix per-period click in TX upsampler (issue #81).
+  * audioio: right-size resampler scratch buffers (fixes #79).
+  * build: fix macOS (Apple clang) compilation.
+  * Fix incompatibility with Hamlib 5.X.
+  * Prevent integer overflow in playback duration calculation.
+  * arq: fix permanent deadlock when app TX ring fills during transfer.
+  * audioio: break on write error instead of corrupting the playback offset.
+  * audioio: fix channel-count overflow, pulse clamp, deinit routing, and SHM guard.
+  * common: async-signal-safe SIGINT handler, shm_map NULL, ring guard, diagnostics.
+  * fix: cfg_write [tnc] section, mg_ws_send length, device-list OOB, port strtol.
+  * docs: complete -h sound-system list, fix mercury.ini.example, remove dead #if 0.
+  * ci: add SANITIZE_TSAN and SANITIZE_ASAN_UBSAN build toggles and informational CI jobs.
+  * tests/fuzz: add libFuzzer targets for ARQ header, framer, KISS, and arith parsers.
+  * tests/sim: add two-FSM in-process ARQ simulation harness.
+  * arq: fix S4 CQ race — move pending_burst_frames to arq_session_t.
+  * radio_io: log PTT failures; net: remove dead tcp_open.
+  * arq: protect arq_conn with g_conn_lock (rebased #111 + complete FSM-thread reads).
+  * arq: fix S1 fade-cliff stall.
+  * arq: make ARQ timing constants INI-tunable (rebased #109).
+  * arq: replace extern-in-.c TNC coupling with arq_tnc_callbacks_t (rebased #110).
+  * ui: derive WebSocket URL port from the served page, not a hardcoded 10000.
+  * modem: add channel-busy detector with VARA-compatible BUSY ON/OFF.
+  * arq: don't let data_retry_slots inflate CALL/ACCEPT retries (fix ACCEPTING linger).
+  * Fyne UI with CGo + Windows Installer.
+  * Updates for new release.
+  * fyne-ui: guard shared appState with a mutex (fix data races).
+  * fyne-ui: keep engine alive on audio failure + share the CLI parser (full CLI via os.Args).
+
+ -- Rafael Diniz <rafael@riseup.net>  Fri, 17 Jul 2026 16:54:24 +0000
+
+mercury (1.9.9-2) unstable; urgency=medium
+
+  * Add mercury-ui binary package: standalone Fyne desktop GUI that embeds
+    the modem engine in-process (no separate daemon required).
+  * Ship a desktop entry and application icon for mercury-ui.
+  * Build-Depends: add golang-go, libgl1-mesa-dev and xorg-dev for the GUI.
+
+ -- Rafael Diniz <rafael@riseup.net>  Wed, 15 Jul 2026 00:15:43 +0100
+
+mercury (1.9.9-1) unstable; urgency=medium
+
+  * Release 1.9.9.
+  * Improve hamlib list models output.
+  * Improve PWA responsive layout for mobile view.
+  * Update installation guide on README.
+  * Add implementation plan for ARQ robustness and TX gain control.
+  * Harden keepalive handling and add mode-revert notification.
+
+ -- Rafael Diniz <rafael@riseup.net>  Thu, 28 May 2026 20:18:47 +0000
+
+mercury (1.9.8-1) unstable; urgency=medium
+
+  * Release 1.9.8.
+  * Added CALLINT command.
+  * Update broadcast for VARA clients support.
+  * Fixes for PulseAudio.
+
+ -- Rafael Diniz <rafael@riseup.net>  Tue, 25 Apr 2026 10:19:00 +0000
+
+mercury (1.9.7-1) unstable; urgency=medium
+
+  * Release 1.9.7.
+  * Fix Windows ARQ socket reads (replace WSAPoll with select).
+  * Add radio_serial_speed config for hamlib baud rate override.
+  * Add MYCALL secondary callsigns support (up to 4).
+  * Add VARA commands: ABORT, VERSION, IGNOREKISSDCD, LISTEN CQ.
+
+ -- Rafael Diniz <rafael@riseup.net>  Tue, 15 Apr 2026 12:00:00 +0100
+
+mercury (1.9.6-1) unstable; urgency=medium
+
+  * Release 1.9.6.
+
+ -- Rafael Diniz <rafael@riseup.net>  Fri, 10 Apr 2026 16:01:00 +0100
+
+mercury (1.9.5-1) unstable; urgency=medium
+
+  * Release 1.9.5.
+
+ -- Rafael Diniz <rafael@riseup.net>  Mon, 23 Mar 2026 00:30:00 +0000
+
+mercury (1.9.4-1) unstable; urgency=medium
+
+  * Release 1.9.4.
+
+ -- Rafael Diniz <rafael@riseup.net>  Thu, 12 Mar 2026 01:29:00 +0000
+
+mercury (1.9.3-1) unstable; urgency=medium
+
+  * Release 1.9.3.
+
+ -- Rafael Diniz <rafael@riseup.net>  Thu, 06 Mar 2026 20:58:00 +0000

@@ -1,0 +1,265 @@
+;
+; Mercury init configuration file
+;
+; Values defined here are loaded at startup and act as defaults.
+; Any setting can be overridden from the command line (CLI takes priority).
+;
+; Run mercury with -K to list supported HAMLIB radio models.
+; Run mercury with -z to list available sound devices.
+;
+
+[main]
+
+; Enable UI communication (WebSocket server for mercury-qt)
+; true / false (default: false)
+ui_enabled = false
+
+; UI WebSocket port (default: 10000)
+ui_port = 10000
+
+; WebSocket protocol: ws (plain) or wss (TLS) (default: ws)
+; wss needs a build with OpenSSL, which is used wherever the system provides
+; it.  Builds without it refuse wss at startup and say so.
+ui_protocol = ws
+
+; Certificate and private key for wss, both PEM.  The defaults below are
+; readable only by root; point these at your own files to run the UI as a
+; normal user, or on Windows and macOS where these paths do not exist.
+;ui_tls_cert = /etc/ssl/certs/hermes.radio.crt
+;ui_tls_key = /etc/ssl/private/hermes.radio.key
+
+; Enable waterfall / spectrum data sent to the UI (default: true)
+waterfall_enabled = true
+
+; Audio capture (input) device id (e.g. "plughw:0,0")
+; Run mercury -z to list available devices, and store the id it prints.
+;
+; On macOS that id is the CoreAudio device UID, a string that stays with the
+; device across replug and reboot and is distinct between two units of the
+; same model.  Do NOT store the enumeration index shown by other tools: it is
+; not an identity, and once the device is replugged it addresses nothing.
+input_device =
+
+; Audio playback (output) device id (e.g. "plughw:0,0")
+; Run mercury -z to list available devices, and store the id it prints.
+output_device =
+
+; Capture input channel: left, right, or stereo (default: left)
+capture_channel = left
+
+; Sound system / IO API: auto, alsa, pulse, dsound, wasapi, oss, coreaudio, aaudio, shm, null, fifo
+; (default: auto — alsa on Linux, dsound on Windows)
+; null is a developer/test backend: RX silence, TX discarded.
+; fifo is a developer/test backend: raw s32le PCM at 8 kHz via input_device/output_device.
+sound_system = auto
+
+; ARQ TCP base port (control = base_port, data = base_port + 1)
+; (default: 8300)
+arq_tcp_base_port = 8300
+
+; Broadcast TCP port (default: 8100)
+broadcast_tcp_port = 8100
+
+; Verbose mode (default: false)
+verbose = false
+
+; FreeDV modem verbosity level, 0 to 3 (default: 0)
+freedv_verbosity = 0
+
+[ptt]
+
+; PTT backend: none, hamlib, serial, cm108, or hermes_shm (default: none).
+; "serial" keys a modem-control line on a serial port -- DigiRig, the
+; All-In-One Cable (AIOC) and most home-brew interfaces.  "cm108" keys a GPIO
+; pin on a CM108/CM119-class USB sound chip; the AIOC does this
+; too, so it is a second way in if the CDC serial port is awkward.
+; "serial_rts" is still accepted and means method=serial with line=rts.
+method = none
+
+; Backend endpoint. For serial use a serial device (for example COM7 or
+; /dev/ttyUSB0). For Hamlib use its serial device or ip:port endpoint.
+device =
+
+; method=serial: which modem-control line keys the radio: rts (default), dtr, or both.
+; Several interfaces, the AIOC included, need BOTH driven together.
+;line = rts
+
+; Cable keys on the LOW state of a line: none (default), rts, dtr, or both.
+; An AIOC is line = both with invert = rts.
+;invert = none
+
+; CM108 GPIO pin, 1..4.  GPIO3 is the de-facto standard.
+;cm108_gpio = 3
+
+; The settings below are used only by method=hamlib.
+; Run mercury -K to list supported model IDs.
+hamlib_model = -1
+
+; 0 uses the Hamlib model default. Must match the radio's CAT rate when set.
+hamlib_serial_speed = 0
+
+; 0=NONE, 1=BUG, 2=ERR, 3=WARN, 4=VERBOSE, 5=TRACE, 6=CACHE
+hamlib_log_level = 0
+
+; On a serial CAT port Mercury holds RTS and DTR low: many rigs (IC-7300 with
+; USB SEND on RTS/DTR, for one) otherwise transmit for as long as the port is
+; open.  Lines used for PTT, or needed high (interfaces powered from DTR),
+; are set here, together with any other Hamlib setting, as rigctl --set-conf
+; takes them: key=value[,key=value...].  For example:
+;hamlib_conf = dtr_state=ON,civaddr=0x94
+
+[audio]
+
+; TX audio gain in dB applied to modulator output samples (default: 0.0).
+; 0.0 dB = no change.  Use this to set Mercury's TX level independently
+; of the host audio mixer, so other modems sharing the radio aren't
+; disturbed when you tune Mercury's drive.  Saturation is applied at the
+; int32 PCM ceiling so any value clips cleanly.
+; Range: -20.0 .. +20.0 (values outside are clamped).
+tx_gain_db = 0.0
+
+; TX keying delay in milliseconds (default: 10), waited after PTT ON before
+; audio is written to the playback device on TX. The default covers the
+; local radio relay's switch time. Increase this if your host app drives
+; PTT off Mercury's "PTT ON" TNC notification and needs more time to
+; actually key the radio (e.g. a slow serial/CAT relay) — otherwise the
+; start of the transmission can be clipped before the radio is keyed.
+; Range: 0 .. 2000 (values outside are clamped).
+tx_delay_ms = 10
+
+[arq]
+
+; ARQ link no-progress disconnect budget (seconds, default: 180).
+; When data-retry slots exhaust on a frame, Mercury no longer disconnects
+; immediately — it resets the retry counter and forces a payload-mode
+; downgrade.  The link only drops when wall-clock since the last ACK that
+; advanced the sequence number exceeds this budget, OR when the keepalive
+; miss limit is reached (5 * 20s = 100s by default).  180s sits just above
+; the keepalive timeout as a safety net for the asymmetric case where peer
+; keepalives still arrive but our TX direction has gone one-way.  Raise
+; this for ultra-marginal NVIS work where forward progress can take longer.
+no_progress_timeout_s = 180
+
+; Absolute cap (seconds, default: 30) on how long an application DISCONNECT
+; may stay deferred while Mercury drains the last queued TX bytes.  When the
+; host (e.g. BPQ32) ends a BBS forwarding session, Mercury finishes sending
+; any buffered data, then completes a clean air-side DISCONNECT handshake.
+; This cap guarantees the link always tears down within the window even if
+; the session is stuck ping-ponging — preventing the rig from being keyed
+; indefinitely after the host has already disconnected.  On a healthy link
+; the drain finishes in seconds, so this only bites on a stuck session.
+disconnect_drain_timeout_s = 30
+
+; Number of DATA-frame retries before a downgrade cycle (default 10, range 1..64).
+; Affects the data plane only; connection-setup (CALL/ACCEPT) retries keep their
+; short defaults so a failed connect gives up quickly.  Use the RETRIES TNC
+; command at runtime to widen CALL/ACCEPT/DATA retries together.
+data_retry_slots = 10
+
+; Seconds to hold the lower mode after a forced downgrade (default 6, range 0..60).
+mode_hold_after_downgrade_s = 6
+
+; Clean ACKs required to step the speed ladder up one level (default 2, range 1..16).
+ladder_up_successes = 2
+
+; Consecutive retries that force a one-step downgrade (default 2, range 1..16).
+retry_downgrade_threshold = 2
+
+; IRS response guard after decoding a frame, in ms (default 700, range 200..3000).
+; Raise if your radio's TX-to-RX switch is slow and you lose ACKs.
+channel_guard_ms = 700
+
+; ISS guard before resuming DATA TX after an ACK, in ms (default 900, range 200..3000).
+iss_post_ack_guard_ms = 900
+
+; Keepalive transmit interval in seconds (default 20, range 5..120).
+keepalive_interval_s = 20
+
+; Missed keepalives before the link is dropped (default 5, range 2..20).
+keepalive_miss_limit = 5
+
+; Seconds to hold the peer's payload mode after activity before reverting
+; (default 15, range 1..120).  Reduce (e.g. 8-10) if you see long gaps between
+; turns; this also scales the IRS inactivity probe (hold x 5).
+peer_payload_hold_s = 15
+
+; Control-mode-only startup window in seconds (default 10, range 2..60).
+; Only DATAC16 is used until the link is proven stable; raise if the initial
+; handshake (e.g. UUCP) times out before the first data frames get through.
+startup_max_s = 10
+
+; Deterministic per-node retry stagger, in ms (default 2000, range 0..5000).
+; The two peers compare the same pair of exchanged callsigns, so exactly one of
+; them defers by this fixed offset on every retry — breaking the phase-lock
+; where two stations on a fixed schedule transmit simultaneously and neither
+; can hear the other (issue #217), without any random draw or latency tail.
+; Set to 0 to disable and revert to the old fixed retry cadence.
+retry_stagger_ms = 2000
+
+[channel]
+; Channel-busy (occupancy) detector.  Mercury classifies the HF channel as
+; busy/clear from the RX spectrum and reports transitions to the host with
+; VARA-compatible "BUSY ON" / "BUSY OFF" notifications on the control port.
+;
+; OFF by default, deliberately.  Mercury itself never gates transmission on it,
+; but the hosts that consume these notifications do: BPQ32 and Winlink hold
+; transmissions while BUSY is asserted, so a detector that fires on noise, or on
+; a station you are already in QSO with, stops the station transmitting and
+; strands traffic in the queue.  That is field experience on HF, not theory, and
+; it is why VARA ships with busy detection off as well.
+;
+; Turn it on if you scan: it is then the only early warning a host gets, since
+; everything else waits for a full frame to decode (3.7 s for a connect request)
+; and a scanning host cannot hold its dwell that long.  Expect to tune the
+; thresholds below per band and noise environment before trusting it.
+;
+; It needs a receive filter at least ~1.8 kHz wide.  It measures 300-2700 Hz
+; and takes its noise floor from the quieter bands there; a narrower filter
+; attenuates enough of that range that the floor sits under the filter skirt and
+; plain noise reads as a signal.  Offline, an empty channel behind a 600-2200 Hz
+; filter read BUSY 99% of the time, while 500-2300 Hz and wider never did.  A
+; continuous signal covering most of the passband is eventually absorbed into
+; the floor and reads CLEAR after ~60 s (+12 dB) to ~95 s (+20 dB), and a step
+; up in the noise itself reads BUSY for ~100-145 s until the floor catches up.
+busy_detect = false
+
+; Level of the loudest 150 Hz band of the 300-2700 Hz passband, in dB above the
+; tracked noise floor, required to call the channel BUSY (default 10, range
+; 3..40).  Lower = more sensitive.  The floor follows the quieter bands, so a
+; signal has to cover most of the passband before it is absorbed into it.
+busy_threshold_db = 10
+
+; Release hysteresis in dB: the channel is only declared CLEAR once the peak
+; falls below (busy_threshold_db - this) (default 3, range 0..20).
+busy_hysteresis_db = 3
+
+; Milliseconds the peak must stay above threshold before asserting BUSY
+; (debounce against transients; default 300, range 0..5000).
+busy_on_debounce_ms = 300
+
+; Milliseconds the peak must stay below the release level before declaring CLEAR
+; (hang time; default 1500, range 0..10000).
+busy_hang_ms = 1500
+
+[tnc]
+; IAMALIVE interval sent on the TNC control port to tell connected clients
+; the TNC is still alive. Valid range: 5..600 seconds. (default: 60)
+keepalive_s = 60
+; Interval between BUFFER reports sent to the TNC control port, telling
+; clients how many bytes are queued for TX. Valid range: 100..10000 ms. (default: 1000)
+buffer_report_ms = 1000
+
+[store]
+; Persist ARQ and broadcast chat messages to a JSONL file so the conversation
+; survives an application restart. true / false (default: true).
+enabled = true
+
+; JSONL message-store file path. Leave empty to use the platform default:
+;   Linux   ~/.local/state/mercury/messages.jsonl
+;   macOS   ~/Library/Application Support/mercury/messages.jsonl
+;   Windows %LOCALAPPDATA%\mercury\messages.jsonl
+;path =
+
+; Number of recent messages kept in memory (and returned by the HISTORY TNC
+; command). Valid range: 1..10000. (default: 500)
+max_messages = 500

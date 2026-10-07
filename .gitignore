@@ -1,0 +1,11 @@
+# Build output
+build/
+app/build/
+.gradle/
+# This PC's Android SDK path
+local.properties
+# Mercury's original git history, kept locally to regenerate patches/
+.upstream-git/
+# IDE files
+.idea/
+*.iml

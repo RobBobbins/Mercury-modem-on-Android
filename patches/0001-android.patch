@@ -1,0 +1,245 @@
+diff --git a/audioio/audioio.c b/audioio/audioio.c
+index 0570149..1a9dc4e 100644
+--- a/audioio/audioio.c
++++ b/audioio/audioio.c
+@@ -268,7 +268,7 @@ int audioio_wait_healthy(int timeout_ms)
+     }
+ }
+ 
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+ static pthread_mutex_t s_pulse_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
+ static bool pulse_init_already_initialized(const ffaudio_init_conf *aconf)
+@@ -307,7 +307,7 @@ static void pulse_shared_uninit(void)
+ 
+ int audioio_pick_default_subsystem(void)
+ {
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     return AUDIO_SUBSYSTEM_ALSA;
+ #elif defined(_WIN32)
+     return AUDIO_SUBSYSTEM_WASAPI;
+@@ -329,7 +329,7 @@ int audioio_available_subsystems(int *subsystems, int max)
+         return 0;
+ 
+ #define ADD(s) do { if (n < max) subsystems[n++] = (s); } while (0)
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     ADD(AUDIO_SUBSYSTEM_ALSA);
+     ADD(AUDIO_SUBSYSTEM_PULSE);
+     if (OSS_IFACE != NULL)
+@@ -1283,7 +1283,7 @@ void *radio_playback_thread(void *device_ptr)
+         audio = (ffaudio_interface *) &ffwasapi;
+     if (audio_subsystem == AUDIO_SUBSYSTEM_DSOUND)
+         audio = (ffaudio_interface *) &ffdsound;
+-#elif defined(__linux__)
++#elif (defined(__linux__) && !defined(__ANDROID__))
+     conf.buf.buffer_length_msec = 30;
+     period_ms = conf.buf.buffer_length_msec / 3;
+     if (audio_subsystem == AUDIO_SUBSYSTEM_ALSA)
+@@ -1310,6 +1310,11 @@ void *radio_playback_thread(void *device_ptr)
+     period_ms = conf.buf.buffer_length_msec / 4;
+     if (audio_subsystem == AUDIO_SUBSYSTEM_COREAUDIO)
+         audio = (ffaudio_interface *) &ffcoreaudio;
++#elif defined(__ANDROID__)
++    conf.buf.buffer_length_msec = 40;
++    period_ms = conf.buf.buffer_length_msec / 4;
++    if (audio_subsystem == AUDIO_SUBSYSTEM_AAUDIO)
++        audio = (ffaudio_interface *) &ffaaudio;
+ #endif
+ 
+ 
+@@ -1728,7 +1733,7 @@ void *radio_capture_thread(void *device_ptr)
+         conf.buf.buffer_length_msec = 200;
+         audio = (ffaudio_interface *) &ffdsound;
+     }
+-#elif defined(__linux__)
++#elif (defined(__linux__) && !defined(__ANDROID__))
+     conf.buf.buffer_length_msec = 30;
+     if (audio_subsystem == AUDIO_SUBSYSTEM_ALSA)
+         audio = (ffaudio_interface *) &ffalsa;
+@@ -1747,6 +1752,10 @@ void *radio_capture_thread(void *device_ptr)
+     conf.buf.buffer_length_msec = 40;
+     if (audio_subsystem == AUDIO_SUBSYSTEM_COREAUDIO)
+         audio = (ffaudio_interface *) &ffcoreaudio;
++#elif defined(__ANDROID__)
++    conf.buf.buffer_length_msec = 40;
++    if (audio_subsystem == AUDIO_SUBSYSTEM_AAUDIO)
++        audio = (ffaudio_interface *) &ffaaudio;
+ #endif
+ 
+ #if defined(_WIN32)
+@@ -2263,7 +2272,7 @@ static int get_soundcard_list_int(int audio_system, int mode,
+         audio = (ffaudio_interface *) &ffwasapi;
+     if (audio_system == AUDIO_SUBSYSTEM_DSOUND)
+         audio = (ffaudio_interface *) &ffdsound;
+-#elif defined(__linux__)
++#elif (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_system == AUDIO_SUBSYSTEM_ALSA)
+         audio = (ffaudio_interface *) &ffalsa;
+     if (audio_system == AUDIO_SUBSYSTEM_PULSE)
+@@ -2283,8 +2292,10 @@ static int get_soundcard_list_int(int audio_system, int mode,
+ 
+     if (!audio)
+         return 0;
++    if (!audio->dev_alloc)  /* backend cannot enumerate (AAudio): default device only */
++        return 0;
+ 
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_system == AUDIO_SUBSYSTEM_PULSE)
+     {
+         if (!pulse_lock_held)
+@@ -2310,7 +2321,7 @@ static int get_soundcard_list_int(int audio_system, int mode,
+     {
+         if (did_init)
+             audio->uninit();
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+         if (audio_system == AUDIO_SUBSYSTEM_PULSE && !pulse_lock_held)
+             pthread_mutex_unlock(&s_pulse_lock);
+ #endif
+@@ -2342,7 +2353,7 @@ static int get_soundcard_list_int(int audio_system, int mode,
+     audio->dev_free(d);
+     if (did_init)
+         audio->uninit();
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_system == AUDIO_SUBSYSTEM_PULSE && !pulse_lock_held)
+         pthread_mutex_unlock(&s_pulse_lock);
+ #endif
+@@ -2552,7 +2563,7 @@ void list_soundcards(int audio_system)
+         audio = (ffaudio_interface *) &ffwasapi;
+     if (audio_subsystem == AUDIO_SUBSYSTEM_DSOUND)
+         audio = (ffaudio_interface *) &ffdsound;
+-#elif defined(__linux__)
++#elif (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_subsystem == AUDIO_SUBSYSTEM_ALSA)
+     {
+         printf("Listing ALSA soundcards:\n");
+@@ -2583,8 +2594,14 @@ void list_soundcards(int audio_system)
+                cfg_sound_system_name(audio_subsystem));
+         return;
+     }
++    if (!audio->dev_alloc)
++    {
++        printf("Sound system '%s' cannot list devices; the system default device is used.\n",
++               cfg_sound_system_name(audio_subsystem));
++        return;
++    }
+ 
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+     {
+         if (pulse_shared_init(&did_init) != 0)
+@@ -2861,7 +2878,7 @@ int audioio_init_internal(char *capture_dev, char *playback_dev, int audio_subsy
+      * here, both threads will see "already initialized" and proceed normally
+      * rather than one of them failing and exiting early.
+      */
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+     {
+         (void) pulse_shared_init(NULL);
+@@ -2895,7 +2912,7 @@ int audioio_restart(const char *capture_dev, const char *playback_dev,
+     audioio_stop_threads();
+     audioio_health_reset();
+ 
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_subsystem == AUDIO_SUBSYSTEM_PULSE || audio_subsys == AUDIO_SUBSYSTEM_PULSE)
+         pthread_mutex_lock(&s_pulse_lock);
+     bool was_pulse = (audio_subsystem == AUDIO_SUBSYSTEM_PULSE);
+@@ -2938,7 +2955,7 @@ int audioio_restart(const char *capture_dev, const char *playback_dev,
+ 
+     if (audio_subsystem == AUDIO_SUBSYSTEM_NULL)
+     {
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+         if (was_pulse || audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+             pthread_mutex_unlock(&s_pulse_lock);
+ #endif
+@@ -2950,7 +2967,7 @@ int audioio_restart(const char *capture_dev, const char *playback_dev,
+ 
+     if (audio_subsystem == AUDIO_SUBSYSTEM_FIFO)
+     {
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+         if (was_pulse || audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+             pthread_mutex_unlock(&s_pulse_lock);
+ #endif
+@@ -2964,7 +2981,7 @@ int audioio_restart(const char *capture_dev, const char *playback_dev,
+ #ifndef _WIN32
+     if (audio_subsystem == AUDIO_SUBSYSTEM_SOCK)
+     {
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+         if (was_pulse || audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+             pthread_mutex_unlock(&s_pulse_lock);
+ #endif
+@@ -2979,7 +2996,7 @@ int audioio_restart(const char *capture_dev, const char *playback_dev,
+ 
+     if (audio_subsystem == AUDIO_SUBSYSTEM_RTP)
+     {
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+         if (was_pulse || audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+             pthread_mutex_unlock(&s_pulse_lock);
+ #endif
+@@ -2990,7 +3007,7 @@ int audioio_restart(const char *capture_dev, const char *playback_dev,
+     }
+ #endif
+ 
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+     {
+         (void) pulse_shared_init(NULL);
+@@ -3000,7 +3017,7 @@ int audioio_restart(const char *capture_dev, const char *playback_dev,
+     pthread_create(&s_radio_capture, NULL, radio_capture_thread, (void *) s_capture_dev);
+     pthread_create(&s_radio_playback, NULL, radio_playback_thread, (void *) s_playback_dev);
+ 
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (was_pulse || audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+         pthread_mutex_unlock(&s_pulse_lock);
+ #endif
+@@ -3017,7 +3034,7 @@ int audioio_deinit(pthread_t *radio_capture, pthread_t *radio_playback)
+     pthread_join(s_radio_capture, NULL);
+     pthread_join(s_radio_playback, NULL);
+ 
+-#if defined(__linux__)
++#if (defined(__linux__) && !defined(__ANDROID__))
+     if (audio_subsystem == AUDIO_SUBSYSTEM_PULSE)
+     {
+         pthread_mutex_lock(&s_pulse_lock);
+diff --git a/data_interfaces/tcp_interfaces.c b/data_interfaces/tcp_interfaces.c
+index 2dfecd5..8c4e4f3 100644
+--- a/data_interfaces/tcp_interfaces.c
++++ b/data_interfaces/tcp_interfaces.c
+@@ -266,7 +266,11 @@ static int open_listener_socket(int port, int port_type, const char *tag)
+ 
+     memset(&local_addr, 0, sizeof(local_addr));
+     local_addr.sin_family = AF_INET;
++#if defined(__ANDROID__)
++    local_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  /* phone only: no LAN access */
++#else
+     local_addr.sin_addr.s_addr = INADDR_ANY;
++#endif
+     local_addr.sin_port = htons(port);
+ 
+     if (bind(fd, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0)
+@@ -1462,7 +1466,11 @@ void *tcp_server_thread(void *port_ptr)
+ 
+     memset(&local_addr, 0, sizeof(local_addr));
+     local_addr.sin_family = AF_INET;
++#if defined(__ANDROID__)
++    local_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  /* phone only: no LAN access */
++#else
+     local_addr.sin_addr.s_addr = INADDR_ANY;
++#endif
+     local_addr.sin_port = htons(tcp_port);
+ 
+     if (bind(tcp_socket, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0)

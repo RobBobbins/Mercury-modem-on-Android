@@ -1,0 +1,124 @@
+# Compiler and flags
+include ../config.mk
+
+# -MMD is stripped here on purpose, and there is no -include of .d files.
+#
+# Every rule below compiles and links in ONE step.  With several sources and a
+# single -o, gcc writes a .d per source but names them all after the OUTPUT, so
+# each overwrites the last: the surviving file says "test_foo: last_unit.c" and
+# records no headers at all.  It buys nothing.
+#
+# It also actively broke the build.  Including such a .d makes its contents a
+# prerequisite of the binary, and a bare $^ then handed a .h to the compiler as
+# a source ("unknown type name 'uint8_t'" out of a perfectly good header).  It
+# only bit on a REBUILD -- a clean checkout has no .d, so the first build
+# succeeds and creates it and the second fails -- which is exactly why it got
+# through CI.
+#
+# Real header tracking here would mean compiling to .o first; these binaries
+# are cheap to rebuild, so they are simply rebuilt.  The $(filter) in each
+# recipe stays as a guard in case a .d ever reappears.
+
+CFLAGS = $(filter-out -MMD -MP,$(COMMON_CFLAGS)) -Wextra -I../common -I../modem -I../modem/mfsk -I.. -I../modem/freedv
+LDFLAGS = -pthread
+
+ifeq ($(OS),Windows_NT)
+LDFLAGS += -lws2_32
+endif
+
+OUT = broadcast_test broadcast_diag_tx broadcast_diag_rx watterson_test acquire_vs_decode resync_gap_probe
+
+# CPU-cost instruments.  Linux/macOS only: they time with
+# clock_gettime(CLOCK_PROCESS_CPUTIME_ID), which mingw-w64 does not provide
+# (undefined reference to clock_gettime at link).  They are development tools
+# for profiling the RX path, so there is nothing to gain from porting them to
+# the Windows build -- just exclude them and keep the cross-compile green.
+ifneq ($(OS),Windows_NT)
+OUT += resampler_bench rxcost_bench
+
+# bcast_file_tool talks to Mercury's broadcast port with BSD sockets
+# (<arpa/inet.h>, <netinet/tcp.h>, unistd read/write), which mingw-w64 does not
+# have -- Windows wants winsock2.  It is a development/diagnostic tool for
+# driving a broadcast file transfer without the UI, so there is nothing to gain
+# from porting it; the UI on Windows uses the same code in-process over CGo.
+OUT += bcast_file_tool
+endif
+
+# Default target
+all: $(OUT)
+
+# Rebuild the tools when their flags change (BUILD_CONFIG, see config.mk).  The
+# recipes filter $^, so these never reach the compiler.
+$(OUT): $(BUILD_CONFIG)
+
+broadcast_test: broadcast_test.c ../datalink_broadcast/kiss.c
+	$(CC) $(CFLAGS) -I../datalink_broadcast -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS)
+
+broadcast_diag_tx: broadcast_diag_tx.c ../datalink_broadcast/kiss.c ../modem/framer.c
+	$(CC) $(CFLAGS) -I../datalink_broadcast -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS)
+
+broadcast_diag_rx: broadcast_diag_rx.c ../datalink_broadcast/kiss.c ../modem/framer.c
+	$(CC) $(CFLAGS) -I../datalink_broadcast -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS)
+
+watterson_test: watterson_test.c ../common/watterson.c ../common/mercury_prng.c
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
+
+# Clean up build artifacts
+clean:
+	rm -f $(OUT) $(addsuffix .exe, $(OUT)) *.d
+
+# Run the program
+run: broadcast_test
+	./broadcast_test 127.0.0.1 8300
+
+# Drives the real freedv OFDM modems (not a model) to separate acquisition
+# failures from decode failures.  chanutil puts it on the project's own
+# Watterson channel so its numbers are comparable with other instruments'.
+acquire_vs_decode: acquire_vs_decode.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+# Does the payload decoder hear a data burst that follows a control burst, and
+# where may the control-plane resync (g_payload_resync_req) land?
+resync_gap_probe: resync_gap_probe.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
+
+# Perf instruments for issue #162 (idle CPU on a 48 kHz Pi 4).
+resampler_bench: resampler_bench.c ../audioio/resampler.c
+	$(CC) $(CFLAGS) -I../audioio -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
+
+rxcost_bench: rxcost_bench.c
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+.PHONY: all clean run
+
+# MFSK waveform sweeps (pure DSP; no modem vtable, no ARQ)
+MFSK_DSP_SRC = ../modem/mfsk/mfsk.c ../modem/mfsk/mfsk_ofdm.c ../modem/mfsk/mfsk_sync.c \
+               ../modem/mfsk/mfsk_ldpc.c ../modem/mfsk/mfsk_ldpc_1_16.c ../modem/mfsk/mfsk_ldpc_2_16.c \
+               ../modem/mfsk/mfsk_ldpc_3_16.c ../modem/mfsk/mfsk_ldpc_5_16.c ../modem/mfsk/mfsk_ldpc_8_16.c
+
+# Both link libfreedvdata.a: they exercise the MFSK waveform against the
+# FreeDV LDPC codes, so they need encode(), run_ldpc_decoder() and
+# ldpc_codes_list() -- which live in codec2.c, mpdecode_core.c and
+# ldpc_codes.c respectively.  Without the archive these compile and then fail
+# at link, which is how they sat broken.
+shortframe_sweep: shortframe_sweep.c ../modem/mfsk/mfsk.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -I../modem -I../modem/mfsk -I../modem/freedv -o $@ $(filter %.c %.a %.o,$^) -lm
+
+# Also needs chanutil (and the Watterson channel it drives), the same set
+# acquire_vs_decode links -- it sweeps the hail suffix over a faded channel.
+hail_suffix_sweep: hail_suffix_sweep.c ../modem/mfsk/mfsk.c ../modem/mfsk/mfsk_ofdm.c ../modem/mfsk/mfsk_sync.c \
+                   chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -I../modem -I../modem/mfsk -I../modem/freedv -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
+
+mfsk_puncture_sweep: mfsk_puncture_sweep.c ../modem/mfsk/mfsk_ldpc.c ../modem/mfsk/mfsk_ldpc_8_16.c
+	$(CC) $(CFLAGS) -I../modem -I../modem/mfsk -o $@ $(filter %.c %.a %.o,$^) -lm
+# Broadcast a file to Mercury, or receive one, over the broadcast TCP/KISS port.
+BCAST_RQ_SRC = $(wildcard ../datalink_broadcast/raptorq/lib/*.c) \
+               $(wildcard ../datalink_broadcast/raptorq/deps/obl/*.c)
+bcast_file_tool: bcast_file_tool.c ../datalink_broadcast/bcast_file.c $(BCAST_RQ_SRC)
+	$(CC) $(CFLAGS) -I../datalink_broadcast -I../datalink_broadcast/raptorq/include \
+	      -I../datalink_broadcast/raptorq/deps -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
+
+# Pull in the header dependencies generated by -MMD (see config.mk).  Each tool
+# is compiled+linked in one step, so -MMD writes a .d named after the binary;
+# include only those (paths are relative to this directory).
