@@ -7,6 +7,8 @@
 #include <ffbase/ring.h>
 #include <aaudio/AAudio.h>
 #include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
 
 static int ffaaudio_init(ffaudio_init_conf *conf)
 {
@@ -146,7 +148,12 @@ static int ffaaudio_open(ffaudio_buf *b, ffaudio_conf *conf, ffuint flags)
 	if (b->capture)
 		AAudioStreamBuilder_setDirection(asb, AAUDIO_DIRECTION_INPUT);
 
-	if (conf->device_id) {
+	/* Android app: a device given as a number is an Android audio device ID (AudioDeviceInfo.getId()). */
+	if (conf->device_id && conf->device_id[0] >= '1' && conf->device_id[0] <= '9'
+		&& strspn(conf->device_id, "0123456789") == strlen(conf->device_id)) {
+		AAudioStreamBuilder_setDeviceId(asb, atoi(conf->device_id));
+
+	} else if (conf->device_id) {
 		typedef AAUDIO_API void (*AAudioStreamBuilder_setInputPreset_t)(AAudioStreamBuilder* builder, aaudio_input_preset_t inputPreset);
 		static AAudioStreamBuilder_setInputPreset_t _AAudioStreamBuilder_setInputPreset;
 		if (!_AAudioStreamBuilder_setInputPreset) {

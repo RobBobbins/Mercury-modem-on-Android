@@ -14,7 +14,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
+import android.text.InputType;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.Spinner;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -34,6 +40,10 @@ public final class MainActivity extends Activity {
     private TextView logView;
     private Button startButton;
     private Button stopButton;
+    private TextView portsView, settingsNote;
+    private EditText controlPort, broadcastPort, txDelay;
+    private Spinner inputDevice, outputDevice;
+    private final List<AudioDeviceInfo> inputs = new ArrayList<>(), outputs = new ArrayList<>();
 
     private final Runnable refresh = new Runnable() {
         @Override
@@ -61,10 +71,8 @@ public final class MainActivity extends Activity {
         statusView.setTextSize(16);
         root.addView(statusView);
 
-        TextView ports = new TextView(this);
-        ports.setText("Control port " + MercuryService.CONTROL_PORT
-                + " · data port " + MercuryService.DATA_PORT + " · this phone only");
-        root.addView(ports);
+        portsView = new TextView(this);
+        root.addView(portsView);
 
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
@@ -90,6 +98,8 @@ public final class MainActivity extends Activity {
         logView.setTextIsSelectable(true);
         root.addView(logView);
 
+        addSettings(root, pad);
+
         TextView about = new TextView(this);
         about.setPadding(0, pad, 0, 0);
         about.setText("Unofficial Android build of the Rhizomatica Mercury HF modem, "
@@ -108,9 +118,120 @@ public final class MainActivity extends Activity {
         setContentView(scroll);
     }
 
+    /** The settings form: ports, sound devices, transmit delay. */
+    private void addSettings(LinearLayout root, int pad) {
+        MercurySettings s = MercurySettings.load(this);
+        TextView title = new TextView(this);
+        title.setText("Settings");
+        title.setTextSize(18);
+        title.setPadding(0, pad, 0, pad / 4);
+        root.addView(title);
+        hint(root, "Changes are used at the next Start. The program that drives Mercury (FieldMail) must use the same control port.");
+
+        controlPort = number(root, "Control port (1024 to 65534; data port is the next number)", s.controlPort);
+        broadcastPort = number(root, "Broadcast port (1024 to 65535)", s.broadcastPort);
+        hint(root, "Defaults 8400 (data 8401) and 8102. The ports are on this phone only.");
+
+        AudioManager am = getSystemService(AudioManager.class);
+        inputDevice = deviceChoice(root, "Sound input (receive)", am.getDevices(AudioManager.GET_DEVICES_INPUTS), inputs, s.inputId, s.inputName);
+        outputDevice = deviceChoice(root, "Sound output (transmit)", am.getDevices(AudioManager.GET_DEVICES_OUTPUTS), outputs, s.outputId, s.outputName);
+
+        txDelay = number(root, "TX delay before sound, ms (0 to 2000; default 150)", s.txDelayMs);
+        hint(root, "Mercury waits this long after PTT ON before sending sound, so the radio is keyed in time "
+                + "when another program (FieldMail) keys it. Mercury's own default is 10.");
+
+        Button save = new Button(this);
+        save.setText("Save settings");
+        save.setOnClickListener(v -> saveSettings());
+        root.addView(save);
+        settingsNote = new TextView(this);
+        root.addView(settingsNote);
+    }
+
+    private void saveSettings() {
+        MercurySettings s = new MercurySettings();
+        try {
+            s.controlPort = Integer.parseInt(controlPort.getText().toString().trim());
+            s.broadcastPort = Integer.parseInt(broadcastPort.getText().toString().trim());
+            s.txDelayMs = Integer.parseInt(txDelay.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            settingsNote.setText("Not saved: every number field needs a whole number.");
+            return;
+        }
+        int in = inputDevice.getSelectedItemPosition(), out = outputDevice.getSelectedItemPosition();
+        s.inputId = in <= 0 ? 0 : inputs.get(in - 1).getId();
+        s.inputName = in <= 0 ? "" : MercurySettings.describe(inputs.get(in - 1));
+        s.outputId = out <= 0 ? 0 : outputs.get(out - 1).getId();
+        s.outputName = out <= 0 ? "" : MercurySettings.describe(outputs.get(out - 1));
+        String problem = s.problem();
+        if (problem != null) {
+            settingsNote.setText("Not saved: " + problem);
+            return;
+        }
+        s.save(this);
+        String state = MercuryService.status();
+        boolean running = !(state.startsWith("Stopped") || state.startsWith("Could not"));
+        settingsNote.setText(running ? "Saved. Stop and Start again to use them." : "Saved. They are used at the next Start.");
+        showPorts();
+    }
+
+    private void showPorts() {
+        MercurySettings s = MercurySettings.load(this);
+        portsView.setText("Control port " + s.controlPort + " · data port " + s.dataPort() + " · broadcast port "
+                + s.broadcastPort + " · this phone only · sound in: " + (s.inputId == 0 ? "phone's default" : s.inputName)
+                + " · sound out: " + (s.outputId == 0 ? "phone's default" : s.outputName));
+    }
+
+    private Spinner deviceChoice(LinearLayout root, String title, AudioDeviceInfo[] devices, List<AudioDeviceInfo> kept, int savedId, String savedName) {
+        label(root, title);
+        List<String> names = new ArrayList<>();
+        names.add("Phone's default");
+        int selected = 0;
+        for (AudioDeviceInfo dev : devices) {
+            int t = dev.getType();
+            // Telephony, FM tuner and similar routes are not usable for a modem.
+            if (t == AudioDeviceInfo.TYPE_TELEPHONY || t == AudioDeviceInfo.TYPE_FM_TUNER || t == AudioDeviceInfo.TYPE_REMOTE_SUBMIX) continue;
+            kept.add(dev);
+            names.add(MercurySettings.describe(dev) + " (device " + dev.getId() + ")");
+            if (dev.getId() == savedId || (selected == 0 && savedId != 0 && MercurySettings.describe(dev).equals(savedName))) selected = kept.size();
+        }
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, names);
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(a);
+        spinner.setSelection(selected);
+        root.addView(spinner);
+        return spinner;
+    }
+
+    private EditText number(LinearLayout root, String title, int value) {
+        label(root, title);
+        EditText e = new EditText(this);
+        e.setText(String.valueOf(value));
+        e.setInputType(InputType.TYPE_CLASS_NUMBER);
+        root.addView(e);
+        return e;
+    }
+
+    private void label(LinearLayout root, String title) {
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setPadding(0, (int) (10 * getResources().getDisplayMetrics().density), 0, 0);
+        root.addView(t);
+    }
+
+    private void hint(LinearLayout root, String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(12);
+        root.addView(t);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        showPorts();
         handler.post(refresh);
     }
 

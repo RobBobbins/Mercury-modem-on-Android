@@ -11,14 +11,18 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.IBinder;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -29,8 +33,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class MercuryService extends Service {
     public static final String ACTION_STOP = "org.w3bguru.mercurymodem.STOP";
-    public static final int CONTROL_PORT = 8400;
-    public static final int DATA_PORT = CONTROL_PORT + 1;
+    /** Ports of the run in progress (from the settings at Start). */
+    private static volatile int controlPort = 8400, dataPort = 8401;
 
     private static final String CHANNEL_ID = "mercury";
     private static final int NOTIFICATION_ID = 1;
@@ -85,6 +89,9 @@ public final class MercuryService extends Service {
     }
 
     private void startInForeground() {
+        MercurySettings s = MercurySettings.load(this);
+        controlPort = s.controlPort;
+        dataPort = s.dataPort();
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(
                 CHANNEL_ID, "Mercury modem", NotificationManager.IMPORTANCE_LOW));
@@ -93,7 +100,7 @@ public final class MercuryService extends Service {
         Notification n = new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("Mercury modem running")
-                .setContentText("Ports " + CONTROL_PORT + " / " + DATA_PORT + " on this phone")
+                .setContentText("Ports " + controlPort + " / " + dataPort + " on this phone")
                 .setContentIntent(open)
                 .setOngoing(true)
                 .build();
@@ -114,18 +121,33 @@ public final class MercuryService extends Service {
             logLines.clear();
         }
         stopping = false;
+        MercurySettings settings = MercurySettings.load(this);
+        int input = presentDevice(AudioManager.GET_DEVICES_INPUTS, settings.inputId, settings.inputName, "input");
+        int output = presentDevice(AudioManager.GET_DEVICES_OUTPUTS, settings.outputId, settings.outputName, "output");
         try {
-            ProcessBuilder pb = new ProcessBuilder(exe.getAbsolutePath(),
+            // Mercury reads mercury.ini from its working folder: the transmit delay lives there.
+            try (FileOutputStream out = new FileOutputStream(new File(getFilesDir(), "mercury.ini"))) {
+                out.write(settings.ini().getBytes(StandardCharsets.UTF_8));
+            }
+            List<String> cmd = new ArrayList<>(Arrays.asList(exe.getAbsolutePath(),
                     "-x", "aaudio",
-                    "-p", String.valueOf(CONTROL_PORT),
-                    "-L", log.getAbsolutePath());
+                    "-p", String.valueOf(settings.controlPort),
+                    "-b", String.valueOf(settings.broadcastPort),
+                    "-L", log.getAbsolutePath()));
+            // A number makes Mercury open that Android audio device (Android patch in ffaudio aaudio.c).
+            if (input != 0) { cmd.add("-i"); cmd.add(String.valueOf(input)); }
+            if (output != 0) { cmd.add("-o"); cmd.add(String.valueOf(output)); }
+            addLogLine("Settings: control port " + settings.controlPort + ", data port " + settings.dataPort()
+                    + ", broadcast port " + settings.broadcastPort + ", sound in " + (input == 0 ? "default" : input)
+                    + ", out " + (output == 0 ? "default" : output) + ", TX delay " + settings.txDelayMs + " ms");
+            ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(getFilesDir());
             pb.environment().put("HOME", getFilesDir().getAbsolutePath());
             pb.environment().put("MERCURY_SHM_DIR", getCacheDir().getAbsolutePath());
             pb.redirectErrorStream(true);
             pb.redirectOutput(console);
             process = pb.start();
-            status = "Running — waiting for a program on port " + CONTROL_PORT;
+            status = "Running — waiting for a program on port " + controlPort;
         } catch (Exception e) {
             status = "Could not start Mercury: " + e.getMessage();
             addLogLine(status);
@@ -137,6 +159,23 @@ public final class MercuryService extends Service {
         final Process p = process;
         watcher = new Thread(() -> watch(p, log), "mercury-watch");
         watcher.start();
+    }
+
+    /**
+     * The device to use: the saved ID if that device is present, else a present device with
+     * the saved name (a re-plugged USB sound card gets a new ID), else 0 (phone's default).
+     */
+    private int presentDevice(int flags, int savedId, String savedName, String what) {
+        if (savedId == 0) return 0;
+        AudioDeviceInfo[] devices = getSystemService(AudioManager.class).getDevices(flags);
+        for (AudioDeviceInfo dev : devices) if (dev.getId() == savedId) return savedId;
+        for (AudioDeviceInfo dev : devices)
+            if (MercurySettings.describe(dev).equals(savedName)) {
+                addLogLine("Sound " + what + ": \"" + savedName + "\" is now device " + dev.getId() + ".");
+                return dev.getId();
+            }
+        addLogLine("Sound " + what + ": \"" + savedName + "\" is not connected; using the phone's default.");
+        return 0;
     }
 
     /** Follows Mercury's log file and notices when the process ends. */
@@ -190,7 +229,7 @@ public final class MercuryService extends Service {
             if (!status.startsWith("Connected")) status = "Running — program attached";
         } else if (line.contains("[tcp-ctl] Control client disconnected")) {
             if (!status.startsWith("Connected"))
-                status = "Running — waiting for a program on port " + CONTROL_PORT;
+                status = "Running — waiting for a program on port " + controlPort;
         }
     }
 
