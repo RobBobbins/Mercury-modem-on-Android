@@ -121,6 +121,9 @@ On the app screen, under **Settings**, saved with **Save settings**, used at the
 | **Broadcast port (1024 to 65535)** | `-b` | 8102 (Mercury's own default 8100 is the Dire Wolf Modem app's AGW port) |
 | **Sound input (receive)** / **Sound output (transmit)** | `-i` / `-o` with the Android audio device ID (patch 0002), or nothing for "Phone's default" | Phone's default |
 | **TX delay before sound, ms (0 to 2000; default 150)** | `[audio] tx_delay_ms` in `mercury.ini` | 150 (Mercury's own default is 10) |
+| **Mercury options** (2026-10-09), under headings **Speed ladder and link** (13), **Busy-channel detector** (5), **Sound** (TX gain, capture channel), **TNC (the program driving Mercury)** (2) | `[arq]`, `[channel]`, `[audio] tx_gain_db`, `[main] capture_channel`, `[tnc]` in `mercury.ini` | Mercury 1.9.17's defaults; each field shows its range (the limits Mercury's `cfg_utils.c` accepts; the two link timeouts 1 to 3,600 s) |
+
+**Restore defaults** puts the TX delay (150 ms) and all 22 Mercury options back to their defaults and saves; the ports and sound devices are not changed. Checked on the phone 2026-10-09: TX gain -2.5, capture channel right and IAMALIVE 30 s were written to `mercury.ini`; Mercury sent IAMALIVE every 30 s on the control port (it read the file); **Restore defaults** set them back. Mercury's other options (screen and web UI, its own PTT and Hamlib, log detail, chat store, sound system) are left out: not usable or not needed on the phone. Release APK 736,606 bytes unsigned (732,650 before).
 
 A sound device is saved by ID and name; at Start a device that is no longer present is looked up by name (a re-plugged USB sound card gets a new ID), else the phone's default is used and the log says so. Checks on save: ports in range, the broadcast port different from the control and data ports, TX delay 0 to 2000 ms. FieldMail's **Mercury control port** (Mercury session screen) must match the control port.
 

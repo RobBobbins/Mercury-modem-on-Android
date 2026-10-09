@@ -18,7 +18,9 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.text.InputType;
 import android.widget.ArrayAdapter;
+import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.LinearLayout;
@@ -29,7 +31,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_PERMISSIONS = 1;
@@ -44,6 +49,8 @@ public final class MainActivity extends Activity {
     private EditText controlPort, broadcastPort, txDelay;
     private Spinner inputDevice, outputDevice;
     private final List<AudioDeviceInfo> inputs = new ArrayList<>(), outputs = new ArrayList<>();
+    /** The field of each Mercury option (EditText, CheckBox or Spinner), by option id. */
+    private final Map<String, View> optionFields = new HashMap<>();
 
     private final Runnable refresh = new Runnable() {
         @Override
@@ -140,6 +147,28 @@ public final class MainActivity extends Activity {
         hint(root, "Mercury waits this long after PTT ON before sending sound, so the radio is keyed in time "
                 + "when another program (FieldMail) keys it. Mercury's own default is 10.");
 
+        // Mercury's own options (mercury.ini), grouped as in Mercury's mercury.ini.example
+        String group = null;
+        for (MercurySettings.Option o : MercurySettings.OPTIONS) {
+            if (!o.group.equals(group)) {
+                group = o.group;
+                TextView g = new TextView(this);
+                g.setText(group);
+                g.setTextSize(16);
+                g.setPadding(0, pad, 0, 0);
+                root.addView(g);
+            }
+            optionFields.put(o.id(), optionField(root, o, s.values.get(o.id())));
+            if (o.help != null) hint(root, o.help);
+        }
+
+        Button defaults = new Button(this);
+        defaults.setText("Restore defaults");
+        defaults.setOnClickListener(v -> restoreDefaults());
+        root.addView(defaults);
+        hint(root, "Puts the TX delay (150 ms) and every Mercury option above back to its default and saves. "
+                + "Ports and sound devices are not changed.");
+
         Button save = new Button(this);
         save.setText("Save settings");
         save.setOnClickListener(v -> saveSettings());
@@ -154,6 +183,7 @@ public final class MainActivity extends Activity {
             s.controlPort = Integer.parseInt(controlPort.getText().toString().trim());
             s.broadcastPort = Integer.parseInt(broadcastPort.getText().toString().trim());
             s.txDelayMs = Integer.parseInt(txDelay.getText().toString().trim());
+            for (MercurySettings.Option o : MercurySettings.OPTIONS) s.values.put(o.id(), fieldValue(o));
         } catch (NumberFormatException e) {
             settingsNote.setText("Not saved: every number field needs a whole number.");
             return;
@@ -173,6 +203,55 @@ public final class MainActivity extends Activity {
         boolean running = !(state.startsWith("Stopped") || state.startsWith("Could not"));
         settingsNote.setText(running ? "Saved. Stop and Start again to use them." : "Saved. They are used at the next Start.");
         showPorts();
+    }
+
+    /** TX delay and Mercury's options back to their defaults on the screen, then saved; ports and devices kept. */
+    private void restoreDefaults() {
+        txDelay.setText(String.valueOf(MercurySettings.TX_DELAY_DEFAULT));
+        for (MercurySettings.Option o : MercurySettings.OPTIONS) setField(o, o.def);
+        saveSettings();
+        if (settingsNote.getText().toString().startsWith("Saved")) settingsNote.setText("Defaults restored. " + settingsNote.getText());
+    }
+
+    private View optionField(LinearLayout root, MercurySettings.Option o, String value) {
+        if (o.flag) {
+            CheckBox c = new CheckBox(this);
+            c.setText(o.label + " (default " + ("true".equals(o.def) ? "on" : "off") + ")");
+            c.setTypeface(Typeface.DEFAULT_BOLD);
+            c.setChecked("true".equals(value));
+            root.addView(c);
+            return c;
+        }
+        label(root, o.label + (o.choices != null ? " (default " + o.def + ")" : " (" + o.range() + "; default " + o.def + ")"));
+        if (o.choices != null) {
+            Spinner sp = new Spinner(this);
+            ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, o.choices);
+            a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            sp.setAdapter(a);
+            sp.setSelection(Math.max(0, Arrays.asList(o.choices).indexOf(value)));
+            root.addView(sp);
+            return sp;
+        }
+        EditText e = new EditText(this);
+        e.setText(value);
+        e.setInputType(o.decimal ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED
+                : InputType.TYPE_CLASS_NUMBER);
+        root.addView(e);
+        return e;
+    }
+
+    private String fieldValue(MercurySettings.Option o) {
+        View v = optionFields.get(o.id());
+        if (v instanceof CheckBox) return ((CheckBox) v).isChecked() ? "true" : "false";
+        if (v instanceof Spinner) return (String) ((Spinner) v).getSelectedItem();
+        return ((EditText) v).getText().toString().trim();
+    }
+
+    private void setField(MercurySettings.Option o, String value) {
+        View v = optionFields.get(o.id());
+        if (v instanceof CheckBox) ((CheckBox) v).setChecked("true".equals(value));
+        else if (v instanceof Spinner) ((Spinner) v).setSelection(Math.max(0, Arrays.asList(o.choices).indexOf(value)));
+        else ((EditText) v).setText(value);
     }
 
     private void showPorts() {
