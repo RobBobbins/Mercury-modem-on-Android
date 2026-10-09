@@ -88,6 +88,8 @@ NDK=/c/Users/Robert/AppData/Local/Android/Sdk/ndk/28.2.13676358
   built-in VARA modem uses 8300/8301 during its VARA sessions.
 - Android-Winlink **Mercury Winlink Session** with Winlink Express (Vara HF P2P
   driving PC Mercury) through the air, 2026-10-07: one message each way (PASS).
+- Attachments both ways with Winlink Express through the air, 2026-10-09: 1,000 bytes
+  phone to PC, 145 bytes PC to phone, both identical (PASS).
 
 ## App build (PC, Git Bash, this folder)
 
