@@ -135,3 +135,9 @@ Checked 2026-10-07 (phone SM-G981W, Digirig on USB, no radio):
 - Built-in microphone (19) and speaker (3) chosen while the Digirig was plugged in: Mercury logged "I/O capture (19)" and "I/O playback (3)"; Android showed the capture on `AUDIO_DEVICE_IN_BUILTIN_MIC` (the playback device shows only while sound plays; not played, to keep the room quiet).
 - Digirig chosen (2864 / 2860), control port 8410: Mercury listened on 8410 / 8411 and broadcast 8102, while the Dire Wolf Modem app ran on 8100 / 8101 at the same time (all on 127.0.0.1). FieldMail (control port 8410) called through it: 5 transmissions, Android showed Mercury's playback started on device 2860, 80 ms after FieldMail had RTS on; Mercury's TX lasted about 3.85 s each (3.7 s before, with a 10 ms delay).
 - Settings put back to the defaults. Release APK 732,430 bytes unsigned (728,654 before).
+
+## Waterfall (2026-10-10)
+
+The main screen shows a **Waterfall** under **Start** / **Stop**: the 8 kHz sound Mercury decodes, 0 to 3,000 Hz, newest at the top. Mercury (patch 0003) sends it as 16-bit samples in UDP datagrams to 127.0.0.1 port 8409 when the app sets `MERCURY_WATERFALL_PORT`; `WaterfallFeed.java` receives them while the screen is visible and `WaterfallView.java` draws them. No band lines: Mercury's width depends on its mode.
+
+Checked on the phone (SM-G981W): the room sound showed while Mercury ran with the phone's microphone. Release APK 741,238 bytes unsigned.
