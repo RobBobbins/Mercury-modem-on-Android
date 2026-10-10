@@ -162,6 +162,8 @@ public final class MercuryService extends Service {
             pb.directory(getFilesDir());
             pb.environment().put("HOME", getFilesDir().getAbsolutePath());
             pb.environment().put("MERCURY_SHM_DIR", getCacheDir().getAbsolutePath());
+            // The screen's waterfall: Mercury (patch 0003) sends its received sound to this local port.
+            pb.environment().put("MERCURY_WATERFALL_PORT", String.valueOf(WaterfallFeed.PORT));
             pb.redirectErrorStream(true);
             pb.redirectOutput(console);
             process = pb.start();

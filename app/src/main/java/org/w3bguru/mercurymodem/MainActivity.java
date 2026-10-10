@@ -43,6 +43,9 @@ public final class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView statusView;
     private TextView logView;
+    /** Waterfall of the sound Mercury receives (sent by the modem to WaterfallFeed.PORT). */
+    private WaterfallView waterfall;
+    private WaterfallFeed waterfallFeed;
     private Button startButton;
     private Button stopButton;
     private TextView portsView, settingsNote;
@@ -94,6 +97,19 @@ public final class MainActivity extends Activity {
         buttons.addView(startButton);
         buttons.addView(stopButton);
         root.addView(buttons);
+
+        TextView waterfallTitle = new TextView(this);
+        waterfallTitle.setText("Waterfall");
+        waterfallTitle.setTextSize(20);
+        waterfallTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        root.addView(waterfallTitle);
+        waterfall = new WaterfallView(this);
+        waterfallFeed = new WaterfallFeed(waterfall);
+        LinearLayout.LayoutParams waterfallSize = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (200 * getResources().getDisplayMetrics().density));
+        waterfallSize.setMargins(0, pad / 4, 0, pad / 2);
+        root.addView(waterfall, waterfallSize);
+        waterfall.setBand(0, 0, 3000);   // Mercury's band depends on its mode: no lines
 
         TextView logTitle = new TextView(this);
         logTitle.setText("Mercury log (last " + LOG_LINES_SHOWN + " lines)");
@@ -312,11 +328,13 @@ public final class MainActivity extends Activity {
         super.onResume();
         showPorts();
         handler.post(refresh);
+        waterfallFeed.start();
     }
 
     @Override
     protected void onPause() {
         handler.removeCallbacks(refresh);
+        waterfallFeed.stop();
         super.onPause();
     }
 

@@ -1,0 +1,59 @@
+diff --git a/upstream/audioio/audioio.c b/upstream/audioio/audioio.c
+index 1a9dc4e..5f80425 100644
+--- a/upstream/audioio/audioio.c
++++ b/upstream/audioio/audioio.c
+@@ -1709,6 +1709,44 @@ finish_play:
+     return NULL;
+ }
+ 
++#if defined(__ANDROID__)
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <fcntl.h>
++/* Android app waterfall: when MERCURY_WATERFALL_PORT is set, each block of the 8 kHz capture
++ * the modem decodes is also sent as 16-bit little-endian samples in UDP datagrams to
++ * 127.0.0.1:<port>. Nothing is sent without the variable; a datagram nobody reads is dropped. */
++static int waterfall_sock = -2;
++static struct sockaddr_in waterfall_addr;
++static void waterfall_send(const int32_t *s, int n)
++{
++    if (waterfall_sock == -2)
++    {
++        const char *p = getenv("MERCURY_WATERFALL_PORT");
++        int port = p ? atoi(p) : 0;
++        waterfall_sock = -1;
++        if (port > 0 && port < 65536 && (waterfall_sock = socket(AF_INET, SOCK_DGRAM, 0)) >= 0)
++        {
++            fcntl(waterfall_sock, F_SETFL, O_NONBLOCK);
++            memset(&waterfall_addr, 0, sizeof(waterfall_addr));
++            waterfall_addr.sin_family = AF_INET;
++            waterfall_addr.sin_port = htons((uint16_t) port);
++            waterfall_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++        }
++    }
++    if (waterfall_sock < 0) return;
++    int16_t out[512];
++    while (n > 0)
++    {
++        int k = n > 512 ? 512 : n, i;
++        for (i = 0; i < k; i++) out[i] = (int16_t)(s[i] >> 16);
++        sendto(waterfall_sock, out, (size_t) k * sizeof(int16_t), MSG_DONTWAIT,
++               (const struct sockaddr *) &waterfall_addr, sizeof(waterfall_addr));
++        s += k; n -= k;
++    }
++}
++#endif
+ 
+ void *radio_capture_thread(void *device_ptr)
+ {
+@@ -2177,6 +2215,9 @@ void *radio_capture_thread(void *device_ptr)
+ 
+         if (downsampled_frames > 0)
+         {
++#if defined(__ANDROID__)
++            waterfall_send(buffer_downsampled, downsampled_frames);
++#endif
+             if (circular_buf_free_size(capture_buffer) >= (size_t)(downsampled_frames * sizeof(int32_t)))
+                 write_buffer(capture_buffer, (uint8_t *)buffer_downsampled, downsampled_frames * sizeof(int32_t));
+             else
